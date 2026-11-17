@@ -3,22 +3,760 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TripAgent</title>
+  <title>TripAgent · 行程规划</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 12vh auto; padding: 0 24px; color: #1a1a2e; }
-    h1 { font-size: 1.6rem; }
-    code { background: #f0f0f5; padding: 2px 6px; border-radius: 4px; }
-    ul { line-height: 1.9; color: #444; }
+    :root {
+      --bg: #f6f7fb; --card: #ffffff; --ink: #1a1a2e; --sub: #6b7080;
+      --accent: #2f5af5; --ok: #0f9d58; --bad: #d93025; --line: #e6e8f0;
+      --mem: #7b5cb8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg); color: var(--ink); margin: 0; padding: 32px 16px 64px;
+    }
+    .wrap { max-width: 960px; margin: 0 auto; }
+    header h1 { font-size: 1.5rem; margin: 0 0 4px; }
+    header p { color: var(--sub); margin: 0 0 24px; font-size: .9rem; }
+    .views { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+    .views span {
+      font-size: .8rem; padding: 4px 12px; border-radius: 999px;
+      background: var(--card); border: 1px solid var(--line); color: var(--sub);
+    }
+    .views span[data-view] { cursor: pointer; }
+    .views span.active { color: var(--accent); border-color: var(--accent); }
+    .card {
+      background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+      padding: 20px; margin-bottom: 16px;
+    }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
+    label { font-size: .8rem; color: var(--sub); display: block; margin-bottom: 4px; }
+    input, select {
+      width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+      font-size: .9rem; background: #fff; color: var(--ink);
+    }
+    fieldset { border: none; padding: 0; margin: 14px 0 0; }
+    legend { font-size: .8rem; color: var(--sub); margin-bottom: 8px; padding: 0; }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 6px; font-size: .82rem;
+      border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px;
+      cursor: pointer; user-select: none; background: #fff;
+    }
+    .chip input { width: auto; }
+    .chip.on { border-color: var(--accent); color: var(--accent); background: #f0f4ff; }
+    .pois { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; }
+    button.primary {
+      margin-top: 18px; background: var(--accent); color: #fff; border: none;
+      padding: 10px 26px; border-radius: 8px; font-size: .95rem; cursor: pointer;
+    }
+    button.primary:disabled { opacity: .5; cursor: wait; }
+    .banner { border-radius: 10px; padding: 12px 16px; font-size: .9rem; margin-bottom: 14px; }
+    .banner.ok { background: #e6f4ea; color: var(--ok); }
+    .banner.bad { background: #fce8e6; color: var(--bad); }
+    .meta { color: var(--sub); font-size: .8rem; margin-bottom: 18px; }
+    .meta code { background: #eef0f6; padding: 1px 6px; border-radius: 4px; }
+    .day { margin-bottom: 18px; }
+    .day h3 { display: flex; justify-content: space-between; font-size: .95rem; margin: 0 0 8px; }
+    .day h3 small { color: var(--sub); font-weight: normal; }
+    table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+    th { color: var(--sub); font-weight: 500; font-size: .78rem; }
+    td.time { font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .tag { font-size: .72rem; color: var(--sub); border: 1px solid var(--line);
+           border-radius: 4px; padding: 0 5px; margin-left: 6px; }
+    .wait { color: #b8860b; font-size: .78rem; }
+    .free { color: var(--ok); }
+    ul.reasons { margin: 8px 0 0; padding-left: 20px; color: var(--bad); font-size: .88rem; }
+    footer { text-align: center; color: var(--sub); font-size: .78rem; margin-top: 32px; }
+    footer a { color: var(--accent); text-decoration: none; }
+    .empty { color: var(--sub); font-size: .85rem; padding: 8px 0; }
+    /* ---- 对话视图（阶段 2）---- */
+    .chat-bar { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
+    .chat-bar > div { flex: 0 0 auto; }
+    .chat-bar .grow { flex: 1 1 200px; }
+    .session-chip {
+      font-size: .78rem; color: var(--sub); background: #eef0f6;
+      border-radius: 6px; padding: 6px 10px;
+    }
+    button.ghost {
+      margin-top: 0; background: #fff; color: var(--accent); border: 1px solid var(--accent);
+      padding: 8px 16px; border-radius: 8px; font-size: .85rem; cursor: pointer;
+    }
+    #msgs { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
+    .msg { max-width: 86%; border-radius: 12px; padding: 12px 16px; font-size: .92rem;
+           line-height: 1.55; }
+    .msg.user { align-self: flex-end; background: var(--accent); color: #fff; }
+    .msg.bot { align-self: flex-start; background: var(--card); border: 1px solid var(--line); }
+    .msg .stages { color: var(--sub); font-size: .74rem; margin-bottom: 6px; }
+    .msg .stages .deg { color: #b8860b; }
+    .msg .plan-area { margin-top: 10px; }
+    .msg .plan-area .banner, .msg .plan-area .day { margin-bottom: 10px; }
+    .badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+    .badge {
+      font-size: .72rem; border-radius: 999px; padding: 2px 10px;
+      border: 1px solid var(--line); color: var(--sub); background: #fff;
+    }
+    .badge.mem { border-color: var(--mem); color: var(--mem); background: #f4f0fb; }
+    .badge.req { border-color: var(--accent); color: var(--accent); background: #f0f4ff; }
+    .composer { display: flex; gap: 10px; margin-top: 16px; }
+    .composer input { flex: 1; }
+    .hint { color: var(--sub); font-size: .78rem; margin-top: 8px; }
+    /* ---- Trace 瀑布图 / 评测看板（阶段 3）---- */
+    .wf { margin-top: 8px; }
+    .wf-row { display: grid; grid-template-columns: 110px 1fr 74px; align-items: center;
+              gap: 8px; padding: 3px 0; }
+    .wf-row .nm { font-size: .8rem; color: var(--sub); text-align: right; }
+    .wf-track { position: relative; height: 18px; background: #f0f2f8; border-radius: 4px; }
+    .wf-bar { position: absolute; top: 2px; bottom: 2px; background: var(--accent);
+              border-radius: 3px; min-width: 3px; }
+    .wf-bar.bad { background: var(--bad); }
+    .wf-row .ms { font-size: .74rem; color: var(--sub); font-variant-numeric: tabular-nums; }
+    .wf-meta { font-size: .72rem; color: var(--sub); margin: 2px 0 8px 118px; word-break: break-all; }
+    #dash_chart svg { width: 100%; height: auto; }
+    #dash_run_out { margin-top: 10px; }
   </style>
 </head>
 <body>
-  <h1>TripAgent · 多约束行程 Agent</h1>
-  <p>静态前端骨架（阶段 0）。三个视图按 project.md §5 逐步落地：</p>
-  <ul>
-    <li>行程对话视图 —— 阶段 1（<code>POST /api/plan</code> 渲染逐日行程卡）</li>
-    <li>Trace 回放视图 —— 阶段 3（<code>GET /api/runs/{trace_id}</code> 瀑布图）</li>
-    <li>评测看板 —— 阶段 3（<code>GET /api/eval/reports</code> 指标趋势）</li>
-  </ul>
-  <p>API 文档：<a href="http://localhost:8000/docs">http://localhost:8000/docs</a>｜探针：<a href="http://localhost:8000/healthz">/healthz</a></p>
+<div class="wrap">
+  <header>
+    <h1>TripAgent · 多约束行程规划</h1>
+    <p>结构化约束 → OR-Tools 求解 → 独立校验器复核；记忆层贯穿多轮对话（project.md §7–8 / ADR-001/003）</p>
+  </header>
+  <div class="views" id="views">
+    <span class="active" data-view="chat">行程对话</span>
+    <span data-view="plan">手动规划</span>
+    <span data-view="trace">Trace 回放</span>
+    <span data-view="dash">评测看板</span>
+  </div>
+
+  <!-- ============ 行程对话（阶段 2） ============ -->
+  <section id="view-chat">
+    <div class="card">
+      <div class="chat-bar">
+        <div>
+          <label>演示用户（B9：无登录，切换用户演示记忆隔离）</label>
+          <select id="user_sel">
+            <option value="u-alice">u-alice（爱丽丝）</option>
+            <option value="u-bob">u-bob（鲍勃）</option>
+          </select>
+        </div>
+        <div class="grow">
+          <label>当前会话</label>
+          <span class="session-chip" id="session_chip"></span>
+        </div>
+        <div>
+          <label>&nbsp;</label>
+          <button class="ghost" id="new_session">＋ 新会话</button>
+        </div>
+      </div>
+      <p class="hint">
+        每轮全量重规划（B12）：试着第 1 轮定预算、第 2 轮加必去点、第 6 轮只改天数——
+        约束来源徽标会显示哪些约束来自记忆、首次提出于第几轮。
+      </p>
+      <div id="msgs"></div>
+      <div class="composer">
+        <input id="chat_input" placeholder="例如：预算 8000 玩 3 天，必去故宫" maxlength="2000">
+        <button class="primary" id="send" style="margin-top:0">发送</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 手动规划（阶段 1） ============ -->
+  <section id="view-plan" hidden>
+    <div class="card">
+      <div class="grid">
+        <div>
+          <label>城市</label>
+          <input value="北京（beijing）" disabled>
+        </div>
+        <div>
+          <label>天数</label>
+          <input id="days" type="number" min="1" max="7" value="3">
+        </div>
+        <div>
+          <label>总预算（元）</label>
+          <input id="budget" type="number" min="1" value="10000">
+        </div>
+        <div>
+          <label>每日在外时长上限（分钟）</label>
+          <input id="cap" type="number" min="60" max="720" step="30" value="480">
+        </div>
+        <div>
+          <label>出发日期</label>
+          <input id="start_date" type="date">
+        </div>
+      </div>
+      <fieldset>
+        <legend>偏好类目（提高对应景点被选中的权重）</legend>
+        <div class="chips" id="prefs"></div>
+      </fieldset>
+      <fieldset>
+        <legend>必去点（硬约束，求解器优先保证覆盖）</legend>
+        <div class="pois" id="pois"></div>
+      </fieldset>
+      <button class="primary" id="go">生成行程</button>
+    </div>
+    <div id="result"></div>
+  </section>
+
+  <!-- ============ Trace 回放（阶段 3） ============ -->
+  <section id="view-trace" hidden>
+    <div class="card">
+      <label>trace_id（行程卡里点「查看 spans →」，或从最近产生的中选一个）</label>
+      <div class="composer" style="margin-top:6px">
+        <input id="trace_input" placeholder="tr-xxxxxxxxxxxx">
+        <button class="primary" id="trace_load" style="margin-top:0">加载瀑布图</button>
+      </div>
+      <div id="recent_traces" class="badges" style="margin-top:10px"></div>
+    </div>
+    <div id="trace_out"></div>
+  </section>
+
+  <!-- ============ 评测看板（阶段 3） ============ -->
+  <section id="view-dash" hidden>
+    <div class="card">
+      <div class="chat-bar">
+        <div class="grow">
+          <label>指标趋势（eval_results 按 git_sha 聚合）</label>
+          <select id="dash_metric"></select>
+        </div>
+        <div><label>&nbsp;</label><button class="ghost" id="dash_refresh">刷新</button></div>
+        <div><label>&nbsp;</label>
+          <button class="primary" id="dash_run" style="margin-top:0">运行评测（公开集）</button></div>
+      </div>
+      <div id="dash_chart" style="margin-top:14px"></div>
+      <div id="dash_baseline" class="meta" style="margin-bottom:0"></div>
+      <div id="dash_run_out"></div>
+    </div>
+    <div class="card">
+      <label>历史评测运行</label>
+      <div id="dash_runs"></div>
+    </div>
+  </section>
+
+  <footer>
+    API 文档 <a id="docs" href="#">/docs</a> ｜ 探针 <a id="hz" href="#">/healthz</a> ｜
+    记忆回放 <a id="memlink" href="#">/api/memory/events</a> ｜
+    数据来源：高德导出 + 人工校对（见 README）
+  </footer>
+</div>
+
+<script>
+"use strict";
+// API 地址：默认同源（nginx 反代 /api，免跨源）；?api= 可覆盖（本地裸 uvicorn 调试）
+const API_BASE = new URLSearchParams(location.search).get("api") || "";
+document.getElementById("docs").href = API_BASE + "/docs";
+document.getElementById("hz").href = API_BASE + "/healthz";
+document.getElementById("memlink").href = API_BASE + "/api/memory/events";
+document.getElementById("start_date").value = new Date().toISOString().slice(0, 10);
+
+const CATS = ["history", "food", "nature", "modern", "shopping", "museum", "religion", "landmark"];
+const CAT_NAMES = { history: "历史", food: "美食", nature: "自然", modern: "现代",
+                    shopping: "购物", museum: "博物馆", religion: "宗教", landmark: "地标" };
+const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+
+/* ---------------- tab 切换 ---------------- */
+const PANES = { chat: "view-chat", plan: "view-plan", trace: "view-trace", dash: "view-dash" };
+document.querySelectorAll("#views span[data-view]").forEach(t => {
+  t.addEventListener("click", () => {
+    document.querySelectorAll("#views span").forEach(x => x.classList.remove("active"));
+    t.classList.add("active");
+    Object.values(PANES).forEach(id => document.getElementById(id).hidden = true);
+    document.getElementById(PANES[t.dataset.view]).hidden = false;
+    if (t.dataset.view === "dash") loadDash(false);
+    if (t.dataset.view === "trace") renderRecentTraces();
+  });
+});
+
+/* ---------------- 公共：行程卡渲染（两个视图共用） ---------------- */
+function itineraryHtml(b, budgetEcho) {
+  const feasible = b.status === "feasible";
+  const v = b.verification ?? { violations: [], recomputed_budget: 0 };
+  let html = feasible
+    ? `<div class="banner ok">✓ 可行 —— 独立校验器复核通过：时间窗冲突 0、预算 ${v.recomputed_budget} 元 ≤ ${budgetEcho} 元</div>`
+    : `<div class="banner bad">✗ 不可行（不硬凑行程，原因如下）</div><ul class="reasons">` +
+      (b.infeasible_reasons ?? []).map(x => `<li>${x}</li>`).join("") + "</ul>";
+  html += `<p class="meta">trace_id <code>${b.trace_id}</code> ` +
+    `｜ 求解 ${b.solver.wall_ms}ms（目标 ${b.solver.objective}，阶段 ${b.solver.phases.join("→")}）` +
+    `｜ 端到端 ${b.cost.latency_ms}ms ｜ ` +
+    `<a href="${API_BASE}/api/runs/${b.trace_id}" target="_blank">查看 spans →</a></p>`;
+  if (feasible) {
+    b.days.forEach(d => {
+      const wd = WEEKDAYS[new Date(d.date + "T00:00:00").getDay()];
+      html += `<div class="card day"><h3>第 ${d.date_index + 1} 天 · ${d.date} ${wd}` +
+        `<small>${d.depart} 出发 → ${d.return} 回酒店 · 在外 ${d.away_minutes} 分钟</small></h3>`;
+      if (!d.stops.length) {
+        html += '<p class="empty">本日自由活动（未安排景点）</p></div>';
+        return;
+      }
+      html += "<table><tr><th>时间</th><th>景点</th><th>等候</th><th>门票</th></tr>";
+      d.stops.forEach(s => {
+        html += `<tr><td class="time">${s.arrive} – ${s.leave}</td>` +
+          `<td>${s.name}<span class="tag">${CAT_NAMES[s.category] || s.category}</span></td>` +
+          `<td>${s.wait_min ? `<span class="wait">等 ${s.wait_min} 分钟</span>` : "—"}</td>` +
+          `<td>${s.ticket ? "¥" + s.ticket : '<span class="free">免费</span>'}</td></tr>`;
+      });
+      html += "</table></div>";
+    });
+    html += `<p class="meta">重算总花费 ${v.recomputed_budget} 元（门票 + 出租车启发式车费）</p>`;
+  }
+  return html;
+}
+
+function constraintBadges(ac) {
+  return (ac.constraints ?? []).map(c => {
+    const fromMem = String(c.source).startsWith("memory_views#");
+    const val = typeof c.value === "object" ? JSON.stringify(c.value) : c.value;
+    return `<span class="badge ${fromMem ? "mem" : "req"}" ` +
+      `title="来源 ${c.source}">${c.field} = ${val} · ${fromMem ? "记忆" : "本轮"} · 第 ${c.turn} 轮</span>`;
+  }).join("");
+}
+
+/* ---------------- 手动规划（阶段 1） ---------------- */
+function chip(text, value, groupName) {
+  const el = document.createElement("label");
+  el.className = "chip";
+  el.innerHTML = `<input type="checkbox" value="${value}" name="${groupName}">${text}`;
+  el.querySelector("input").addEventListener("change", () => el.classList.toggle("on"));
+  return el;
+}
+
+const prefsEl = document.getElementById("prefs");
+CATS.forEach(c => prefsEl.appendChild(chip(`${CAT_NAMES[c]} (${c})`, c, "pref")));
+
+fetch(API_BASE + "/api/pois").then(r => r.json()).then(pois => {
+  const el = document.getElementById("pois");
+  pois.forEach(p => {
+    const c = chip(
+      `${p.name} <span class="tag">${CAT_NAMES[p.category] || p.category}</span>` +
+      (p.ticket ? `<span class="tag">¥${p.ticket}</span>` : `<span class="tag free">免费</span>`),
+      p.id, "must");
+    if (p.id === "forbidden_city") {  // 默认必去：故宫（§10 示例）
+      c.querySelector("input").checked = true;
+      c.classList.add("on");
+    }
+    el.appendChild(c);
+  });
+}).catch(() => {
+  document.getElementById("pois").innerHTML =
+    '<p class="empty">POI 目录加载失败（API 未启动？）</p>';
+});
+
+function picked(groupName) {
+  return [...document.querySelectorAll(`input[name=${groupName}]:checked`)].map(i => i.value);
+}
+
+document.getElementById("go").addEventListener("click", async () => {
+  const btn = document.getElementById("go");
+  const out = document.getElementById("result");
+  btn.disabled = true; btn.textContent = "求解中…";
+  out.innerHTML = '<p class="empty">OR-Tools 求解 + 独立校验中，约 1–3 秒…</p>';
+  const payload = {
+    city: "beijing",
+    days: +document.getElementById("days").value,
+    hotel: "wangfujing",
+    budget: +document.getElementById("budget").value,
+    daily_minutes_cap: +document.getElementById("cap").value,
+    must_visit: picked("must"),
+    preferences: picked("pref"),
+    session_id: "web",
+    start_date: document.getElementById("start_date").value || undefined,
+  };
+  try {
+    const r = await fetch(API_BASE + "/api/plan", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = await r.json();
+    if (!r.ok) {
+      out.innerHTML = `<div class="banner bad">请求被拒绝（${r.status}）</div>` +
+        `<pre>${JSON.stringify(body.detail ?? body, null, 2)}</pre>`;
+      return;
+    }
+    let html = itineraryHtml(body, payload.budget);
+    html += `<p class="meta">约束来源 ${body.applied_constraints.source} · 第 ${body.applied_constraints.turn} 轮</p>`;
+    out.innerHTML = html;
+    rememberTrace(body.trace_id);
+  } catch (e) {
+    out.innerHTML = `<div class="banner bad">请求失败：${e}</div>`;
+  } finally {
+    btn.disabled = false; btn.textContent = "生成行程";
+  }
+});
+
+/* ---------------- 行程对话（阶段 2）：SSE 流消费 ---------------- */
+let CHAT_USER = "u-alice";
+let CHAT_SESSION = newSessionId();
+
+function newSessionId() {
+  return "s-web-" + Math.random().toString(36).slice(2, 8);
+}
+
+function refreshSessionChip() {
+  document.getElementById("session_chip").textContent =
+    `${CHAT_SESSION}（用户 ${CHAT_USER}）`;
+}
+
+document.getElementById("user_sel").addEventListener("change", e => {
+  CHAT_USER = e.target.value;
+  refreshSessionChip();
+  botNotice(`已切换到用户 ${CHAT_USER}——该用户的跨会话记忆会自动注入，与他人互不可见（B9）。`);
+});
+
+document.getElementById("new_session").addEventListener("click", () => {
+  CHAT_SESSION = newSessionId();
+  document.getElementById("msgs").innerHTML = "";
+  refreshSessionChip();
+  botNotice(`新会话 ${CHAT_SESSION} 开始。${CHAT_USER} 的 user 级约束（如预算习惯）仍会跨会话注入；点“＋ 新会话”可随时重置演示。`);
+});
+
+function el(tag, cls, html) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (html !== undefined) n.innerHTML = html;
+  return n;
+}
+
+function appendMsg(cls) {
+  const node = el("div", `msg ${cls}`);
+  document.getElementById("msgs").appendChild(node);
+  node.scrollIntoView({ behavior: "smooth", block: "end" });
+  return node;
+}
+
+function botNotice(text) {
+  const n = appendMsg("bot");
+  n.appendChild(el("div", null, text));
+}
+
+const STAGE_LABELS = { memory: "记忆读取", resolver: "意图解析", "memory.write": "约束写回",
+                       solver: "求解", verifier: "独立校验" };
+
+function makeBotBubble() {
+  const node = appendMsg("bot");
+  const stages = el("div", "stages", "…");
+  const reply = el("div", "reply", "");
+  const planArea = el("div", "plan-area", "");
+  node.append(stages, reply, planArea);
+  return { node, stages, reply, planArea, text: "", traceId: null,
+           stageList: [], violations: [] };
+}
+
+function renderStages(ctx) {
+  const parts = ctx.stageList.map(s => {
+    const label = STAGE_LABELS[s.name] || s.name;
+    const deg = s.degraded ? '<span class="deg">（规则模板降级）</span>' : "";
+    const viol = (s.guardrail_violations ?? []).length
+      ? ` <span class="deg" title="${s.guardrail_violations.join("；")}">⚠护栏${s.guardrail_violations.length}</span>` : "";
+    return label + deg + viol;
+  });
+  ctx.stages.innerHTML = parts.length ? parts.join(" → ") : "…";
+}
+
+function finishBubble(ctx, done) {
+  ctx.traceId = done.trace_id;
+  rememberTrace(done.trace_id);
+  const llm = done.llm ?? {};
+  ctx.stageList.push({ name: "回复", degraded: llm.degraded });
+  renderStages(ctx);
+  if (done.type === "clarification") {
+    ctx.reply.innerHTML = `❓ <b>需要澄清（${done.field}）</b>：${done.reason}`;
+    ctx.node.scrollIntoView({ behavior: "smooth", block: "end" });
+    return;
+  }
+  const plan = done.plan;
+  const ac = plan.applied_constraints ?? {};
+  let html = `<div class="badges">${constraintBadges(ac)}</div>`;
+  html += itineraryHtml(plan, ac.budget);
+  html += `<p class="meta">第 ${done.turn} 轮 ｜ LLM 调用 ${llm.llm_calls ?? 0} 次` +
+    `${llm.degraded ? "（含降级）" : ""} ｜ token ${llm.token_in ?? 0}+${llm.token_out ?? 0}` +
+    ` ｜ <a href="${API_BASE}/api/memory/events?session_id=${CHAT_SESSION}" target="_blank">回放 Ledger →</a></p>`;
+  ctx.planArea.innerHTML = html;
+  ctx.node.scrollIntoView({ behavior: "smooth", block: "end" });
+}
+
+async function sendChat() {
+  const input = document.getElementById("chat_input");
+  const btn = document.getElementById("send");
+  const text = input.value.trim();
+  if (!text || btn.disabled) return;
+  input.value = "";
+  appendMsg("user").innerHTML = text.replace(/</g, "&lt;");
+  btn.disabled = true;
+  const ctx = makeBotBubble();
+  ctx.stageList.push({ name: "开始", degraded: false });
+  renderStages(ctx);
+  try {
+    const resp = await fetch(API_BASE + "/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: CHAT_SESSION, user_id: CHAT_USER, message: text }),
+    });
+    if (!resp.ok || !resp.body) {
+      ctx.reply.innerHTML = `<div class="banner bad">请求失败（${resp.status}）</div>`;
+      return;
+    }
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const block = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        handleSseBlock(ctx, block);
+      }
+    }
+    if (buf.trim()) handleSseBlock(ctx, buf);  // 无结尾空块的残余
+  } catch (e) {
+    ctx.reply.innerHTML += `<div class="banner bad">连接中断：${e}</div>`;
+  } finally {
+    btn.disabled = false;
+    input.focus();
+  }
+}
+
+function handleSseBlock(ctx, block) {
+  const lines = block.split("\n").filter(Boolean);
+  const evLine = lines.find(l => l.startsWith("event: "));
+  const dataLine = lines.find(l => l.startsWith("data: "));
+  if (!evLine || !dataLine) return;
+  const ev = evLine.slice(7).trim();
+  let data;
+  try { data = JSON.parse(dataLine.slice(6)); } catch { return; }
+  if (ev === "stage") {
+    ctx.stageList.push(data);
+    renderStages(ctx);
+  } else if (ev === "delta") {
+    ctx.text += data.text;
+    ctx.reply.innerHTML = ctx.text.replace(/</g, "&lt;").replace(/\n/g, "<br>");
+    ctx.node.scrollIntoView({ behavior: "smooth", block: "end" });
+  } else if (ev === "clarification") {
+    /* done 事件统一渲染 */
+  } else if (ev === "done") {
+    finishBubble(ctx, data);
+  }
+}
+
+document.getElementById("send").addEventListener("click", sendChat);
+document.getElementById("chat_input").addEventListener("keydown", e => {
+  if (e.key === "Enter") sendChat();
+});
+
+refreshSessionChip();
+botNotice("你好！我是 TripAgent。告诉我预算、天数、想去的景点，我会用约束求解器排出可执行的行程，并全程记住你的约束。");
+
+/* ---------------- Trace 回放（阶段 3）：瀑布图 ---------------- */
+const SPAN_LABELS = { "memory.read": "记忆读取", "resolver.resolve": "意图解析",
+                      "memory.write": "约束写回", "solver.solve": "求解",
+                      "verifier.check": "独立校验", "responder.render": "回复渲染" };
+const LAST_TRACES = [];
+
+function rememberTrace(id) {
+  if (!id || LAST_TRACES.includes(id)) return;
+  LAST_TRACES.unshift(id);
+  if (LAST_TRACES.length > 6) LAST_TRACES.pop();
+  renderRecentTraces();
+}
+
+function renderRecentTraces() {
+  const box = document.getElementById("recent_traces");
+  if (!box) return;
+  box.innerHTML = LAST_TRACES.length
+    ? LAST_TRACES.map(t =>
+        `<span class="badge req" style="cursor:pointer" data-trace="${t}">${t}</span>`).join("")
+    : '<span class="empty">还没有 trace——去「行程对话」发一句话或跑一次手动规划。</span>';
+  box.querySelectorAll("[data-trace]").forEach(b =>
+    b.addEventListener("click", () => loadTrace(b.dataset.trace)));
+}
+
+async function loadTrace(traceId) {
+  const out = document.getElementById("trace_out");
+  out.innerHTML = '<p class="empty">加载中…</p>';
+  try {
+    const r = await fetch(API_BASE + "/api/runs/" + encodeURIComponent(traceId));
+    if (!r.ok) {
+      out.innerHTML = `<div class="banner bad">trace 不存在（${r.status}）——去对话视图产生一条。</div>`;
+      return;
+    }
+    out.innerHTML = traceHtml(await r.json());
+  } catch (e) {
+    out.innerHTML = `<div class="banner bad">请求失败：${e}</div>`;
+  }
+}
+
+function traceHtml(run) {
+  const spans = run.spans ?? [];
+  const t0 = spans.length ? Math.min(...spans.map(s => s.start_ms)) : 0;
+  const total = Math.max((spans.length ? Math.max(...spans.map(s => s.end_ms)) : 0) - t0, 1);
+  let html = `<div class="card"><h3 style="margin:0 0 10px;font-size:1rem">run ` +
+    `<code>${run.trace_id}</code> 的六段瀑布</h3>` +
+    `<p class="meta">状态 ${run.status} ｜ 会话 <code>${run.session_id}</code> ｜ ` +
+    `模型 ${run.model ?? "—"} ｜ git ${run.git_sha ?? "—"} ｜ ` +
+    `${run.started_at} → ${run.finished_at ?? "…"} ｜ 端到端 ${run.latency_ms ?? "—"}ms ｜ ` +
+    `token ${run.token_in ?? 0}+${run.token_out ?? 0}</p><div class="wf">`;
+  spans.forEach(s => {
+    const left = ((s.start_ms - t0) / total) * 100;
+    const width = Math.max(((s.end_ms - s.start_ms) / total) * 100, 0.6);
+    const bad = s.status !== "ok";
+    html += `<div class="wf-row"><div class="nm">${SPAN_LABELS[s.name] || s.name}</div>` +
+      `<div class="wf-track"><div class="wf-bar${bad ? " bad" : ""}" ` +
+      `style="left:${left.toFixed(2)}%;width:${width.toFixed(2)}%" ` +
+      `title="${s.name} ${s.start_ms}→${s.end_ms}（${s.status}）"></div></div>` +
+      `<div class="ms">${s.duration_ms}ms</div></div>`;
+    if (s.meta) {
+      html += `<div class="wf-meta">${escapeJson(s.meta)}</div>`;
+    }
+  });
+  html += "</div>";
+  html += `<details style="margin-top:12px"><summary style="cursor:pointer;` +
+    `font-size:.82rem;color:var(--sub)">请求回显</summary>` +
+    `<pre style="font-size:.74rem;overflow:auto">${escapeJson(run.request)}</pre></details>`;
+  html += "</div>";
+  return html;
+}
+
+function escapeJson(obj) {
+  return JSON.stringify(obj, null, 2).replace(/</g, "&lt;");
+}
+
+document.getElementById("trace_load").addEventListener("click", () => {
+  const v = document.getElementById("trace_input").value.trim();
+  if (v) loadTrace(v);
+});
+document.getElementById("trace_input").addEventListener("keydown", e => {
+  if (e.key === "Enter") document.getElementById("trace_load").click();
+});
+renderRecentTraces();
+
+/* ---------------- 评测看板（阶段 3）：趋势 + 运行列表 ---------------- */
+/* 指标标签与聚合形态（rate/sum/mean）由 GET /api/eval/reports 的 metrics_meta 下发，
+   前端不再硬编码指标语义 */
+let DASH_DATA = null;
+
+async function loadDash(force) {
+  if (DASH_DATA && !force) { renderDash(); return; }
+  document.getElementById("dash_chart").innerHTML = '<p class="empty">加载中…</p>';
+  try {
+    const r = await fetch(API_BASE + "/api/eval/reports");
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    DASH_DATA = await r.json();
+    renderDash();
+  } catch (e) {
+    document.getElementById("dash_chart").innerHTML =
+      `<div class="banner bad">看板加载失败：${e}（先运行一次评测）</div>`;
+  }
+}
+
+function pct(v) {
+  return (v === null || v === undefined || Number.isNaN(v))
+    ? "—" : (v <= 1 ? (v * 100).toFixed(1) + "%" : String(Math.round(v)));
+}
+
+function renderDash() {
+  const sel = document.getElementById("dash_metric");
+  if (!sel.options.length) {
+    (DASH_DATA.metrics_meta || DASH_DATA.metrics || []).forEach(m => {
+      const name = typeof m === "string" ? m : m.name;
+      const o = document.createElement("option");
+      o.value = name;
+      o.textContent = typeof m === "string" ? name : `${m.label}（${name}）`;
+      sel.appendChild(o);
+    });
+    if ((DASH_DATA.metrics || []).includes("final_pass_rate")) sel.value = "final_pass_rate";
+    sel.addEventListener("change", renderDashChart);
+  }
+  renderDashChart();
+  const b = DASH_DATA.baseline;
+  document.getElementById("dash_baseline").innerHTML = b
+    ? `CI 回归基线（reports/baseline.json）：git <code>${b.git_sha}</code> · ` +
+      `评测集 v${b.eval_set_version} · final ${pct(b.metrics["final_pass_rate"])} · ` +
+      `硬约束 ${pct(b.metrics["hard_constraint_pass_rate"])} · ` +
+      `时间窗冲突 ${b.metrics["time_window_violations"] ?? "—"}`
+    : "尚无 CI 基线（reports/baseline.json 未生成）。";
+  const runs = DASH_DATA.runs || [];
+  document.getElementById("dash_runs").innerHTML = runs.length
+    ? "<table><tr><th>时间（UTC）</th><th>git_sha</th><th>final</th><th>硬约束</th>" +
+      "<th>时间窗冲突</th><th>记忆召回</th></tr>" +
+      runs.map(ru => `<tr><td>${String(ru.created_at).slice(0, 19).replace("T", " ")}</td>` +
+        `<td><code>${ru.git_sha}</code></td>` +
+        `<td>${pct(ru.metrics["final_pass_rate"]?.pass_rate)}</td>` +
+        `<td>${pct(ru.metrics["hard_constraint_pass_rate"]?.pass_rate)}</td>` +
+        `<td>${ru.metrics["time_window_violations"]?.value_sum ?? "—"}</td>` +
+        `<td>${pct(ru.metrics["memory_recall@6"]?.pass_rate)}</td></tr>`).join("") +
+      "</table>"
+    : '<p class="empty">还没有评测记录——点右上「运行评测」，或 CLI：' +
+      '<code>python -m app.eval.runner</code></p>';
+}
+
+function renderDashChart() {
+  const m = document.getElementById("dash_metric").value;
+  const box = document.getElementById("dash_chart");
+  const trend = (DASH_DATA.trends || {})[m] || [];
+  if (!trend.length) { box.innerHTML = '<p class="empty">该指标暂无数据。</p>'; return; }
+  // 聚合形态来自后端 metrics_meta（rate=通过率 / sum=求和 / mean=均值，真 P95 见报告 md）
+  const meta = (DASH_DATA.metrics_meta || []).find(x => x.name === m);
+  const mode = (meta && meta.agg) || "rate";
+  const pts = trend.map(t => ({
+    sha: String(t.git_sha).slice(0, 7),
+    y: mode === "rate" ? (t.total ? t.passed / t.total : 0)
+      : mode === "sum" ? t.value : (t.total ? t.value / t.total : 0),
+  }));
+  const ys = pts.map(p => p.y);
+  const ymin = 0;
+  const ymax = mode === "rate" ? 1 : (Math.max(...ys) * 1.15 || 1);
+  const W = 640, H = 210, L = 46, R = 12, T = 14, B = 34;
+  const x = i => L + (pts.length === 1 ? (W - L - R) / 2 : i * (W - L - R) / (pts.length - 1));
+  const y = v => H - B - (v - ymin) / (ymax - ymin || 1) * (H - T - B);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img">`;
+  svg += `<line x1="${L}" y1="${y(ymin)}" x2="${W - R}" y2="${y(ymin)}" stroke="#e6e8f0"/>`;
+  [ymin, (ymin + ymax) / 2, ymax].forEach(v => {
+    svg += `<text x="${L - 6}" y="${y(v) + 4}" text-anchor="end" font-size="10" fill="#6b7080">` +
+      `${mode === "rate" ? pct(v) : Math.round(v)}</text>` +
+      `<line x1="${L}" y1="${y(v)}" x2="${W - R}" y2="${y(v)}" stroke="#f0f2f8"/>`;
+  });
+  svg += `<polyline fill="none" stroke="#2f5af5" stroke-width="2" points="` +
+    pts.map((p, i) => `${x(i)},${y(p.y)}`).join(" ") + '"/>';
+  pts.forEach((p, i) => {
+    svg += `<circle cx="${x(i)}" cy="${y(p.y)}" r="4" fill="#2f5af5"><title>${p.sha}: ` +
+      `${mode === "rate" ? pct(p.y) : Math.round(p.y * 10) / 10}</title></circle>`;
+    if (pts.length <= 8 || i % 2 === 0) {
+      svg += `<text x="${x(i)}" y="${H - B + 16}" text-anchor="middle" font-size="10" ` +
+        `fill="#6b7080">${p.sha}</text>`;
+    }
+  });
+  svg += "</svg>";
+  box.innerHTML = svg;
+}
+
+document.getElementById("dash_refresh").addEventListener("click", () => loadDash(true));
+
+document.getElementById("dash_run").addEventListener("click", async () => {
+  const btn = document.getElementById("dash_run");
+  const out = document.getElementById("dash_run_out");
+  btn.disabled = true;
+  btn.textContent = "评测中…（约 1 分钟）";
+  out.innerHTML = '<p class="empty">公开集 current 列运行中：plan 32 + chat 脚本驱动。</p>';
+  try {
+    const r = await fetch(API_BASE + "/api/eval/run", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    });
+    const body = await r.json();
+    if (!r.ok) throw new Error(JSON.stringify(body.detail ?? body).slice(0, 300));
+    out.innerHTML = `<div class="banner ok">完成：${body.summary} · 报告 ` +
+      `<code>${body.report_path}</code>（git ${body.git_sha}）</div>`;
+    await loadDash(true);
+  } catch (e) {
+    out.innerHTML = `<div class="banner bad">评测失败：${e}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "运行评测（公开集）";
+  }
+});
+</script>
 </body>
 </html>

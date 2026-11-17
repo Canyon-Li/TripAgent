@@ -59,6 +59,8 @@ class Settings:
     database_url: str
     eval_cases_path: str
     log_level: str
+    # 基线 B 开关（ADR-006：完整管线关闭记忆注入；on/off）
+    memory_injection: bool
     # 版本可追溯（§11.4：/healthz 返回 version + git_sha）
     version: str
     git_sha: str
@@ -81,6 +83,8 @@ def get_settings() -> Settings:
         database_url=val("DATABASE_URL", "sqlite:///./data/tripagent.db"),
         eval_cases_path=val("EVAL_CASES_PATH", "./data/eval_cases.jsonl"),
         log_level=val("LOG_LEVEL", "INFO"),
+        memory_injection=val("MEMORY_INJECTION", "on").strip().lower()
+        not in {"off", "0", "false", "no"},
         version=__version__,
         git_sha=_git_sha(),
     )

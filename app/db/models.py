@@ -1,8 +1,9 @@
-"""runs / spans 表模型（§9 DDL，阶段 0 仅建这两张；其余表随阶段 2–4 迁移）。"""
+"""数据表模型（§9 DDL）：runs / spans（阶段 0）+ memory_events / memory_views（阶段 2）
++ eval_results（阶段 3）。"""
 
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -14,6 +15,8 @@ class Run(Base):
     trace_id: Mapped[str] = mapped_column(String, primary_key=True)
     session_id: Mapped[str] = mapped_column(String, nullable=False)
     request_json: Mapped[str] = mapped_column(Text, nullable=False)
+    # 最终 PlanResponse（阶段 3：最近一次可行方案回退 + Trace 回放用）；失败/中断可为空
+    response_json: Mapped[str | None] = mapped_column(Text)
     # running | succeeded | failed | interrupted
     status: Mapped[str] = mapped_column(String, nullable=False)
     model: Mapped[str | None] = mapped_column(String)
@@ -38,3 +41,56 @@ class Span(Base):
     end_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False)
     meta_json: Mapped[str | None] = mapped_column(Text)
+
+
+class MemoryEvent(Base):
+    """Ledger：追加写、不可变（ADR-003）。矛盾用 supersedes_id 归档，不物理删除。"""
+
+    __tablename__ = "memory_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    session_id: Mapped[str] = mapped_column(String, nullable=False)
+    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    # assertion | belief | decision | observation（§9）
+    event_type: Mapped[str] = mapped_column(String, nullable=False)
+    content_json: Mapped[str] = mapped_column(Text, nullable=False)
+    # user_stated | behavior | environment | agent_generated（Provenance）
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    # session:<sid> | user:<uid> | global（§9 的 trip:<id> 按实际语义落为 session）
+    scope: Mapped[str] = mapped_column(String, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    decay_weight: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    supersedes_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("memory_events.id")
+    )
+    created_at: Mapped[str] = mapped_column(String, nullable=False)  # UTC ISO-8601
+
+
+class MemoryView(Base):
+    """派生视图（可从 Ledger 重放重建，§7.2）；valid_to 非空 = 已被更新版本替代。"""
+
+    __tablename__ = "memory_views"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # hard_constraints | persona | summary（§9）
+    view_type: Mapped[str] = mapped_column(String, nullable=False)
+    subject_key: Mapped[str] = mapped_column(String, nullable=False)  # = scope
+    value_json: Mapped[str] = mapped_column(Text, nullable=False)
+    derived_from: Mapped[str] = mapped_column(Text, nullable=False)  # event id list
+    valid_from: Mapped[str] = mapped_column(String, nullable=False)
+    valid_to: Mapped[str | None] = mapped_column(String)
+    last_confirmed_at: Mapped[str | None] = mapped_column(String)
+
+
+class EvalResult(Base):
+    """评测结果（§9）：一次评测运行的每用例×指标一行，按 git_sha 聚合出趋势（看板）。"""
+
+    __tablename__ = "eval_results"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    git_sha: Mapped[str] = mapped_column(String, nullable=False)
+    case_id: Mapped[str] = mapped_column(String, nullable=False)
+    metric: Mapped[str] = mapped_column(String, nullable=False)
+    passed: Mapped[int] = mapped_column(Integer, nullable=False)
+    value: Mapped[float | None] = mapped_column(Float)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)  # UTC ISO-8601
