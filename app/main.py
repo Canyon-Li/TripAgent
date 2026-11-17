@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
-from app.api import chat, health, plan
+from app.api import chat, health, memory, plan
 from app.config import get_settings
 
 # 本机调试来源白名单（compose 下走 nginx 同源反代，不触发 CORS）
@@ -32,6 +32,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(plan.router)
     app.include_router(chat.router)
+    app.include_router(memory.router)
     return app
 
 
