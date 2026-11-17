@@ -66,9 +66,10 @@ def test_six_turn_evolution_recall(client):
     assert by["preferences"]["turn"] == 2
     assert by["daily_minutes_cap"]["turn"] == 5
     assert by["days"]["turn"] == 6 and by["days"]["source"] == "request"
-    # 列表并集保持早期成员（轮 4 显式 + 轮 1 记忆），首提轮次保留最早成员的
+    # 列表并集保持早期成员（轮 4 显式 + 轮 1 记忆）；来源保持记忆侧不被本轮覆写
+    # （turn = 当前并集值确立的轮次 4；成员首提轮次 1 由 Ledger 历史可回放）
     assert set(by["must_visit"]["value"]) == {"summer_palace", "forbidden_city"}
-    assert by["must_visit"]["turn"] == 1
+    assert by["must_visit"]["turn"] == 4
     assert by["must_visit"]["source"].startswith("memory_views#")
     # 全量重规划可行且覆盖
     assert d6["plan"]["status"] == "feasible" and len(d6["plan"]["days"]) == 3

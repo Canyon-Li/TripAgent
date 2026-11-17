@@ -104,7 +104,9 @@ def test_memory_views_endpoint_shows_scope_chain(client):
     v = r.json()["views"]
     assert v["session:api-vw"]["value"]["constraints"].get("days") == 1
     assert v["user:u-vw"]["value"]["constraints"].get("budget") == 7777
-    assert v["global"] is None  # 未写过 global
+    # global 可能含其他测试留下的约束（global 全局共享），只断言不含本测试字段
+    g = (v["global"] or {}).get("value", {}).get("constraints", {})
+    assert "budget" not in g and "days" not in g
 
 
 def test_memory_rebuild_endpoint_consistent(client):

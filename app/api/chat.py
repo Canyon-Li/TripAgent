@@ -37,7 +37,7 @@ from app.memory.service import ConstraintOrigin
 from app.runtime.pipeline import run_plan_pipeline
 from app.runtime.resolver import RecallLookup, resolve
 from app.runtime.responder import compose_reply, split_deltas
-from app.schemas import AppliedConstraintsOut, ChatRequest, PlanRequest
+from app.schemas import AppliedConstraintsOut, ChatRequest, ConstraintEcho, PlanRequest
 
 router = APIRouter(prefix="/api")
 
@@ -72,7 +72,7 @@ def _build_history(session_id: str) -> list[dict[str, str]]:
 
 def _recall_lookup(session_id: str, user_id: str) -> RecallLookup:
     """B15：recall_constraint 的执行体——同源 memory_views，按 scope 链检索。"""
-    chain = [f"session:{session_id}", f"user:{user_id}", "global"]
+    chain = policy.scope_chain(session_id, user_id)
 
     def lookup(key: str) -> dict[str, Any] | None:
         for scope in chain:
@@ -285,7 +285,7 @@ def _run_turn(
         fields={k: v for k, v in final.items() if k in policy.FIELD_SCOPES},
         turn=turn,
     )
-    for scope in {f"session:{req.session_id}", f"user:{req.user_id}"}:
+    for scope in {policy.session_scope(req.session_id), policy.user_scope(req.user_id)}:
         views.refresh_view(scope)
     _span(trace_id, "memory.write", w0, written=report.written,
           superseded=report.superseded, skipped=report.skipped_unchanged)
@@ -313,7 +313,7 @@ def _run_turn(
         budget=plan_req.budget,
         source=next(c.source for c in merged if c.field == "budget"),
         turn=next(c.turn for c in merged if c.field == "budget"),
-        constraints=[c.to_public() for c in merged],
+        constraints=[ConstraintEcho(**c.to_public()) for c in merged],
     )
     yield _sse("stage", {"name": "verifier", "status": "done",
                          "plan_status": plan_resp.status})

@@ -8,7 +8,7 @@ LLM 可见的全部工具就是这份 WHITELIST——求解器 / 校验器 / 记
 from __future__ import annotations
 
 import json
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -133,10 +133,3 @@ def validate_tool_call(name: str, arguments_json: str) -> tuple[BaseModel | None
         loc = ".".join(str(x) for x in first["loc"])
         return None, f"schema_validation_failed:{name}.{loc}:{first['msg']}"
 
-
-def tools_payload_for_request() -> list[dict[str, Any]]:
-    """发给 OpenAI-compatible 端点的 tools 参数（B17 原生透传）。"""
-    return TOOLS_SCHEMA
-
-
-ToolKind = Literal["submit", "clarify", "recall"]

@@ -35,6 +35,19 @@ def scope_for(field: str, *, user_id: str, session_id: str) -> str:
     return f"user:{user_id}" if kind == "user" else f"session:{session_id}"
 
 
+def session_scope(session_id: str) -> str:
+    return f"session:{session_id}"
+
+
+def user_scope(user_id: str) -> str:
+    return f"user:{user_id}"
+
+
+def scope_chain(session_id: str, user_id: str) -> list[str]:
+    """Memory.read 的读取链：session → user → global（前者优先，§7.2）。"""
+    return [session_scope(session_id), user_scope(user_id), "global"]
+
+
 @dataclass
 class WriteReport:
     """一次 apply 的写入判定结果（观测与测试断言用）。"""

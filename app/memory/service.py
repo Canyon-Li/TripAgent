@@ -10,10 +10,10 @@
 from __future__ import annotations
 
 import datetime as dt
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 from typing import Any
 
-from app.memory import ledger, views
+from app.memory import ledger, policy, views
 
 HALF_LIFE_DAYS_DEFAULT = 30.0  # §7.2 时间衰减：30 天半衰期
 
@@ -50,7 +50,7 @@ def read_memory(
 ) -> list[ConstraintOrigin]:
     """按 scope 链 session → user → global 读取活跃硬约束（前者优先），按有效置信度降序。"""
     now = now or dt.datetime.now(dt.UTC)
-    chain = [f"session:{session_id}", f"user:{user_id}", "global"]
+    chain = policy.scope_chain(session_id, user_id)
     acc: dict[str, ConstraintOrigin] = {}
     for scope in chain:
         v = views.current_view(scope)
@@ -112,7 +112,3 @@ def merge_constraints(
 def origins_to_fields(origins: list[ConstraintOrigin]) -> dict[str, Any]:
     """约束列表 → {field: value} 平铺（构造 PlanRequest / 写回 Ledger 用）。"""
     return {c.field: c.value for c in origins}
-
-
-def to_public_list(origins: list[ConstraintOrigin]) -> list[dict[str, Any]]:
-    return [asdict(c) for c in origins]

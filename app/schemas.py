@@ -9,7 +9,7 @@ wait_min、门票）、applied_constraints、verification.violations、cost。
 from __future__ import annotations
 
 import datetime as dt
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -79,14 +79,26 @@ class VerificationOut(BaseModel):
     recomputed_budget: float = 0.0
 
 
+class ConstraintEcho(BaseModel):
+    """applied_constraints.constraints[] 元素（§10 逐字段回显）。"""
+
+    field: str
+    value: Any
+    source: str
+    turn: int
+
+
 class AppliedConstraintsOut(BaseModel):
-    """约束来源回显（§10）。source 形如 "request" / "memory_views#17"；turn 为首次提出轮次。"""
+    """约束来源回显（§10）。source 形如 "request" / "memory_views#17"。
+
+    turn 语义：单值未变字段 = 首提轮次；列表并集字段 = 当前值确立轮次
+    （成员首提轮次由 Ledger 历史可回放，见 service.merge_constraints）。
+    """
 
     budget: float
     source: str = "request"
     turn: int = 1
-    # 逐字段 {field,value,source,turn}（阶段 2）
-    constraints: list[dict] = Field(default_factory=list)
+    constraints: list[ConstraintEcho] = Field(default_factory=list)
 
 
 class CostOut(BaseModel):

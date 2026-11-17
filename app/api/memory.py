@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query
 
-from app.memory import ledger, views
+from app.memory import ledger, policy, views
 
 router = APIRouter(prefix="/api/memory")
 
@@ -33,7 +33,7 @@ def memory_events(
 @router.get("/views")
 def memory_views(session_id: str, user_id: str) -> dict:
     """scope 链三个作用域的当前活跃视图（Memory.read 的同源数据，B15）。"""
-    chain = [f"session:{session_id}", f"user:{user_id}", "global"]
+    chain = policy.scope_chain(session_id, user_id)
     return {"views": {scope: views.current_view(scope) for scope in chain}}
 
 
