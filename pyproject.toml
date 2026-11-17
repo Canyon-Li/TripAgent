@@ -1,0 +1,38 @@
+[project]
+name = "tripagent"
+version = "0.1.0"
+description = "多约束行程 Agent 可靠性平台 —— FastAPI + OR-Tools + SQLite（见 project.md）"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "ortools>=9.11",
+    "sqlalchemy>=2.0",
+    "alembic>=1.14",
+    "httpx>=0.28",
+    "openai>=1.60",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.9",
+]
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
