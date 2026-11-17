@@ -122,6 +122,8 @@ def main() -> int:
         for line in Path(args.cases).read_text(encoding="utf-8").splitlines()
         if line.strip() and not line.startswith("#")
     ]
+    cases = [c for c in cases if "_meta" not in c]  # 阶段 3：跳过评测集版本头
+    cases = [c for c in cases if c.get("kind", "plan") == "plan"]  # chat 用例归 eval runner
     results = run_checks(cases, include_hidden=args.include_hidden)
 
     n_pass = sum(1 for r in results if r["passed"])

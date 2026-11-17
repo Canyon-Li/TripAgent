@@ -217,9 +217,12 @@ def _run_turn(
         session_id=req.session_id, user_id=req.user_id, text=req.message, turn=turn
     )
 
-    # ---- 2. Memory.read（固定链路，权威注入，B15）----
+    # ---- 2. Memory.read（权威注入 B15；MEMORY_INJECTION=off 关闭 = 基线 B，ADR-006）----
     m0 = tick()
-    memory = service.read_memory(session_id=req.session_id, user_id=req.user_id)
+    if get_settings().memory_injection:
+        memory = service.read_memory(session_id=req.session_id, user_id=req.user_id)
+    else:
+        memory = []
     active = service.origins_to_fields(memory)
     _span(trace_id, "memory.read", m0, fields=len(memory),
           sources={c.field: c.source for c in memory})
@@ -235,7 +238,8 @@ def _run_turn(
         meter=meter,
         poi_index=poi_index,
         poi_catalog=poi_catalog,
-        recall_lookup=_recall_lookup(req.session_id, req.user_id),
+        recall_lookup=_recall_lookup(req.session_id, req.user_id)
+        if get_settings().memory_injection else (lambda _key: None),
     )
     fields, norm_violations = _normalize_fields(outcome.fields, poi_index)
     outcome.guardrail_violations += norm_violations
@@ -326,7 +330,8 @@ def _run_turn(
     try:
         plan_req = PlanRequest(
             session_id=req.session_id,
-            start_date=dt.date.today(),
+            start_date=dt.date.fromisoformat(req.start_date) if req.start_date
+            else dt.date.today(),
             days=int(final.get("days", 3)),
             budget=float(final["budget"]),
             daily_minutes_cap=int(final.get("daily_minutes_cap", 480)),

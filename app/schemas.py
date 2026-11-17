@@ -127,8 +127,13 @@ class PlanResponse(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    """POST /api/chat 请求（§10 SSE 流式对话；B9 无登录，session/user 直接声明）。"""
+    """POST /api/chat 请求（§10 SSE 流式对话；B9 无登录，session/user 直接声明）。
+
+    start_date 可选（默认当天）：评测用例固定日期以保证周一闭馆类断言确定性（§15），
+    生产前端不传。
+    """
 
     session_id: str = Field(default="s-default", min_length=1, max_length=64)
     user_id: str = Field(default="u-demo", min_length=1, max_length=64)
     message: str = Field(min_length=1, max_length=2000)
+    start_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")

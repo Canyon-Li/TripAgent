@@ -51,10 +51,11 @@ def test_eval_results_save_and_trend():
     ])
 
     trend = evals_db.list_metric_trend("hard_constraint_pass_rate")
-    assert [t["git_sha"] for t in trend] == ["sha1", "sha2"]
-    assert trend[0]["passed"] == 1 and trend[0]["total"] == 2
+    mine = [t for t in trend if t["git_sha"].startswith("sha")]  # 排除其他测试写入的行
+    assert [t["git_sha"] for t in mine] == ["sha1", "sha2"]
+    assert mine[0]["passed"] == 1 and mine[0]["total"] == 2
     tw = evals_db.list_metric_trend("time_window_violations")
-    assert tw[0]["value"] == 2.0  # 求和语义（冲突总数）
+    assert next(t for t in tw if t["git_sha"] == "sha1")["value"] == 2.0  # 求和语义
 
     reports = evals_db.list_report_runs()
     shas = [r["git_sha"] for r in reports]
