@@ -1,0 +1,35 @@
+# --- 密钥与环境（真实密钥永不入库）---
+.env
+.env.*
+!.env.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# --- 本地数据库与运行时产物（data/ 下的数据集 json/jsonl 应入库）---
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# --- 测试 / Lint 缓存 ---
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- IDE / OS ---
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# reports/ 是否入库：按 TASKS 0.1 另行决定；当前默认入库（评测报告是 §16 证据链的一部分），
+# 若决定不入库，取消下一行注释：
+# reports/
