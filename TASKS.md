@@ -53,6 +53,9 @@
 
 **验收**：第 6 轮约束回显正确（source/turn 指向记忆事件）；`POST /api/memory/rebuild` 重放后 views 与增量更新一致；跨会话（同 user 新 session）约束仍注入、切换用户不串扰；`pytest -q` 全绿 + ruff clean；浏览器实测多轮对话与用户切换。　✅ 2026-11-17 全过：六轮演进第 6 轮各约束来源/轮次正确回显（budget 演进链 turn=3、早期约束 turn=2/4/5 不滑点）；rebuild consistent=True（含 healed 补建语义）；u-alice 跨会话注入 vs u-bob 隔离澄清；pytest 106 绿 + ruff clean + check_plans 10/10；浏览器（真实 DeepSeek）实测多轮对话、用户切换、SSE 流式渲染
 
+> **Code review 修复（2026-11-17，fcbcf5f..53da64e 两轴审查后）**：①B15 补真实检索回路——recall_constraint 由运行时查 memory_views 同源值、tool 结果回灌模型、两路合并去重（端到端测试）；②SSE 补 error 事件，异常 run 落 failed、客户端断开落 interrupted；③confidence 补 JSON Schema 数值边界 + schema↔pydantic 契约断言；④列表并集溯源保留记忆侧来源与首提轮次（不被本轮覆写；turn 语义 = 当前值确立轮次，成员首提由 Ledger 可回放）；⑤清理零调用符号、ConstraintEcho 小模型、scope 构造收敛 policy.scope_chain。修后 pytest 111 绿 + ruff clean + check_plans 10/10。
+> **已知尾项（延后阶段 3）**：§7.1 降级语义的「最近一次可行方案」未实现（当前降级 = 规则模板解析后重新求解，无 runs 历史回退）——依赖按 session 查询历史 runs 的能力，与 Trace 回放/评测基础设施同批落地更顺。
+
 ---
 
 ## 后续阶段（占位，阶段 2 冻结后细化）
