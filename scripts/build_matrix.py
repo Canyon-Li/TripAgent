@@ -1,7 +1,7 @@
 """一次性预计算 POI 间驾车耗时矩阵（TASKS 0.5，B7）。
 
 用法：
-    .venv/Scripts/python.exe scripts/build_matrix.py                 # 默认读 data/pois.json → data/matrix.json
+    .venv/Scripts/python.exe scripts/build_matrix.py  # 默认 data/pois.json -> data/matrix.json
     .venv/Scripts/python.exe scripts/build_matrix.py --pois d.json --out m.json
 
 行为：
@@ -45,7 +45,9 @@ def load_env(path: Path) -> dict[str, str]:
     return env
 
 
-def amap_column(client: httpx.Client, key: str, coords: list[dict], dest: dict) -> list[tuple[float, float]]:
+def amap_column(
+    client: httpx.Client, key: str, coords: list[dict], dest: dict
+) -> list[tuple[float, float]]:
     """一个目的地列：返回 [(seconds, meters)]，顺序与 coords 一致。"""
     origins = "|".join(f"{c['lng']},{c['lat']}" for c in coords)
     r = client.get(AMAP_DISTANCE_URL, params={
@@ -67,7 +69,9 @@ def amap_column(client: httpx.Client, key: str, coords: list[dict], dest: dict) 
     return out
 
 
-def osrm_table(client: httpx.Client, coords: list[dict]) -> tuple[list[list[float]], list[list[float]]]:
+def osrm_table(
+    client: httpx.Client, coords: list[dict]
+) -> tuple[list[list[float]], list[list[float]]]:
     """OSRM 兜底：一次性全对全表，返回 (seconds, meters)。"""
     path = ";".join(f"{c['lng']},{c['lat']}" for c in coords)
     r = client.get(OSRM_TABLE_URL + path, params={"annotations": "duration,distance"})
