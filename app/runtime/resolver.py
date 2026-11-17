@@ -1,9 +1,14 @@
-"""Resolver（§7.6 / ADR-008 / B14）：白名单 function calling 意图解析 + 护栏 + 降级。
+"""Resolver（§7.6 / ADR-008 / B14 / B15）：白名单 function calling 意图解析 + 护栏 + 降级。
 
 护栏（每次 tool_call 逐条执行，违规不中断、全部记录）：
 - 非白名单工具名 → 拒绝并记违规；
 - 参数 JSON 解析 + pydantic 强校验（tools.py 的 schema）；
-- 单次请求工具调用上限 MAX_TOOL_CALLS=3，超出截断并记违规。
+- 单次请求工具调用上限 MAX_TOOL_CALLS=3（累计计数，防循环），超出截断并记违规。
+
+B15 双通道（真实 function calling 回路）：模型调 recall_constraint(key) 时，
+运行时执行 recall_lookup（同源 memory_views）并把结果以 tool 消息回灌给模型，
+模型随后 submit_plan_request；召回值再与固定链路 Memory.read 合并去重
+（合并动作在 chat 主链路，两路同源故正常无增量，链路完备性由测试守住）。
 
 降级（§7.1 / §14）：LLM 不可用 / 失败 → 规则模板正则抽取（degraded=True，
 进 spans 观测）。规则模板是兜底而非主路径——抽取能力有限（不支持中文数字等），
@@ -14,6 +19,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -25,6 +31,9 @@ from app.llm.tools import (
     SubmitPlanRequestArgs,
     validate_tool_call,
 )
+
+# recall_lookup 返回：{"value": 检索值, "source": 如 "memory_views#7"}；未命中为 None
+RecallLookup = Callable[[str], dict[str, Any] | None]
 
 SYSTEM_PROMPT_TEMPLATE = """你是 TripAgent 的意图解析器（Resolver）。
 用户正在多轮对话中规划北京行程。
@@ -54,7 +63,9 @@ class ResolverOutcome:
     kind: str                                  # plan | clarification
     fields: dict[str, Any] = field(default_factory=dict)   # kind=plan：本轮显式约束
     clarification: tuple[str, str] | None = None           # (field, reason)
-    recalled_keys: list[str] = field(default_factory=list) # recall_constraint 辅助通道（B15）
+    # B15 辅助通道实际召回：key -> {"value", "source"}（未命中进 recalled_misses）
+    recalled: dict[str, dict[str, Any]] = field(default_factory=dict)
+    recalled_misses: list[str] = field(default_factory=list)
     guardrail_violations: list[str] = field(default_factory=list)
     degraded: bool = False                     # True = 规则模板降级产出
     llm_used: bool = True
@@ -89,62 +100,109 @@ def resolve(
     llm_enabled: bool = True,
     poi_index: tuple[tuple[str, str], ...] = (),
     poi_catalog: str = "",
+    recall_lookup: RecallLookup | None = None,
 ) -> ResolverOutcome:
-    """意图解析主入口。LLM 缺失/不可用/失败时降级规则模板（返回 degraded=True）。"""
+    """意图解析主入口（function calling 回路，B15）。
+
+    LLM 缺失/不可用/失败时降级规则模板（返回 degraded=True）。模型每轮可调
+    白名单工具；recall_constraint 由运行时执行检索并把结果回灌，直到模型给出
+    submit_plan_request / ask_clarification，或累计工具调用数达上限（防循环）。
+    """
     if llm is None or not llm_enabled:
         meter.mark_degraded()
         return _degraded_outcome(message, poi_index)
-    try:
-        result = llm.chat(
-            messages=build_resolver_messages(message, active_constraints, history, poi_catalog),
-            tools=TOOLS_SCHEMA,
-        )
-        meter.add(result)
-    except (LLMError, LLMRetryableError):
-        meter.mark_degraded()
-        return _degraded_outcome(message, poi_index)
 
+    messages = build_resolver_messages(message, active_constraints, history, poi_catalog)
     violations: list[str] = []
     fields: dict[str, Any] = {}
     clarification: tuple[str, str] | None = None
-    recalled: list[str] = []
+    recalled: dict[str, dict[str, Any]] = {}
+    recalled_misses: list[str] = []
+    total_calls = 0
 
-    calls = list(result.tool_calls)
-    if len(calls) > MAX_TOOL_CALLS:
-        violations.append(f"too_many_tool_calls:{len(calls)}>{MAX_TOOL_CALLS}")
-        calls = calls[:MAX_TOOL_CALLS]
+    while total_calls < MAX_TOOL_CALLS:
+        try:
+            result = llm.chat(messages=messages, tools=TOOLS_SCHEMA)
+            meter.add(result)
+        except (LLMError, LLMRetryableError):
+            meter.mark_degraded()
+            return _degraded_outcome(message, poi_index)
 
-    for tc in calls:
-        args, violation = validate_tool_call(tc.name, tc.arguments_json)
-        if violation:
-            violations.append(violation)
+        calls = list(result.tool_calls)
+        if not calls:
+            break  # 模型放弃工具调用（纯文本）——按无有效调用处理
+        if total_calls + len(calls) > MAX_TOOL_CALLS:
+            violations.append(
+                f"too_many_tool_calls:{total_calls + len(calls)}>{MAX_TOOL_CALLS}"
+            )
+            calls = calls[: MAX_TOOL_CALLS - total_calls]
+
+        tool_replies: list[dict[str, str]] = []
+        recall_assistant_calls: list[dict[str, Any]] = []
+        for tc in calls:
+            total_calls += 1
+            args, violation = validate_tool_call(tc.name, tc.arguments_json)
+            if violation:
+                violations.append(violation)
+                continue
+            if tc.name == "submit_plan_request":
+                a = args if isinstance(args, SubmitPlanRequestArgs) else SubmitPlanRequestArgs()
+                # city 恒为 beijing、confidence 是观测信号：都不是约束字段，不进 fields
+                fields = {
+                    k: v for k, v in a.model_dump().items()
+                    if v is not None and k not in ("city", "confidence")
+                }
+            elif tc.name == "ask_clarification":
+                clarification = (args.field, args.reason)  # type: ignore[attr-defined]
+            elif tc.name == "recall_constraint":
+                key = args.key  # type: ignore[attr-defined]
+                hit = recall_lookup(key) if recall_lookup else None
+                if hit is not None:
+                    recalled[key] = hit
+                    content = {"key": key, "found": True, **hit}
+                else:
+                    recalled_misses.append(key)
+                    content = {"key": key, "found": False,
+                               "note": "记忆视图（memory_views）中无该字段"}
+                # 回灌：assistant 声明 + tool 结果，模型下一轮据此 submit/ask（B15）
+                recall_assistant_calls.append({
+                    "id": tc.id, "type": "function",
+                    "function": {"name": tc.name, "arguments": tc.arguments_json},
+                })
+                tool_replies.append({
+                    "role": "tool", "tool_call_id": tc.id,
+                    "content": json.dumps(content, ensure_ascii=False, default=str),
+                })
+
+        if fields or clarification:
+            break  # 终态：拿到可执行约束或澄清请求
+        if tool_replies and total_calls < MAX_TOOL_CALLS:
+            messages = [
+                *messages,
+                {"role": "assistant", "content": result.text or "",
+                 "tool_calls": recall_assistant_calls},
+                *tool_replies,
+            ]
             continue
-        if tc.name == "submit_plan_request":
-            a = args if isinstance(args, SubmitPlanRequestArgs) else SubmitPlanRequestArgs()
-            # city 恒为 beijing、confidence 是观测信号：都不是约束字段，不进 fields
-            fields = {
-                k: v for k, v in a.model_dump().items()
-                if v is not None and k not in ("city", "confidence")
-            }
-        elif tc.name == "ask_clarification":
-            clarification = (args.field, args.reason)  # type: ignore[attr-defined]
-        elif tc.name == "recall_constraint":
-            recalled.append(args.key)  # type: ignore[attr-defined]
+        if not tool_replies:
+            break  # 无进展（违规或空轮）→ 终止
+        # recall 回灌额度耗尽仍未终态：循环护栏
+        violations.append(f"tool_call_budget_exhausted:{total_calls}")
 
     if fields:  # 拿到可执行约束即规划（模型同时 ask 时以 submit 为准）
         return ResolverOutcome(
-            kind="plan", fields=fields, recalled_keys=recalled,
-            guardrail_violations=violations,
+            kind="plan", fields=fields, recalled=recalled,
+            recalled_misses=recalled_misses, guardrail_violations=violations,
         )
     if clarification:
         return ResolverOutcome(
-            kind="clarification", clarification=clarification,
-            recalled_keys=recalled, guardrail_violations=violations,
+            kind="clarification", clarification=clarification, recalled=recalled,
+            recalled_misses=recalled_misses, guardrail_violations=violations,
         )
     return ResolverOutcome(
         kind="clarification",
         clarification=("message", "未能从消息中解析出行程约束，请说明天数、预算或想去的景点"),
-        recalled_keys=recalled,
+        recalled=recalled, recalled_misses=recalled_misses,
         guardrail_violations=[*violations, "no_effective_tool_call"],
     )
 

@@ -155,3 +155,45 @@ def test_chinese_preference_normalized_to_category_id(install_llm, client):
     assert by_field["preferences"]["value"] == ["history", "food"]
     stage = next(d for e, d in events if e == "stage" and d.get("name") == "resolver")
     assert "unknown_preference_dropped:不存在的类目" in stage["guardrail_violations"]
+
+
+def test_b15_recall_channel_end_to_end(install_llm, client):
+    """B15 双通道：模型显式 recall(budget) → 运行时从 memory_views 同源检索回灌
+    → 模型 submit；done.memory.recalled 携带检索值；applied budget 与权威通道去重一致。"""
+    install_llm(FakeLLM([
+        tool_call_result(("submit_plan_request", json.dumps({"budget": 6600, "days": 1}))),
+    ]))
+    _post(client, "预算6600玩1天", session="sc-b15", user="u-b15")
+
+    install_llm(FakeLLM([
+        tool_call_result(("recall_constraint", json.dumps({"key": "budget"}))),
+        tool_call_result(("submit_plan_request", json.dumps({"days": 2}))),
+    ]))
+    events = _post(client, "还是按上次那个预算，玩2天", session="sc-b15", user="u-b15")
+    done = events[-1][1]
+    recalled = done["memory"]["recalled"]
+    assert recalled["budget"]["value"] == 6600
+    assert recalled["budget"]["source"].startswith("memory_views#")
+    assert done["memory"]["recalled_misses"] == []
+    # 两路同源去重：applied 与权威 Memory.read 注入一致
+    ac = done["plan"]["applied_constraints"]
+    assert ac["budget"] == 6600 and ac["source"] == recalled["budget"]["source"]
+    # 两次 LLM 调用（recall 轮 + submit 轮）+ responder
+    assert done["llm"]["llm_calls"] == 3
+
+
+def test_sse_error_event_and_failed_run(monkeypatch, install_llm, client):
+    """修 2：主链路异常 → SSE error 事件 + run 落 failed（不再永停 running）。"""
+    install_llm(FakeLLM([
+        tool_call_result(("submit_plan_request", json.dumps({"budget": 5000, "days": 1}))),
+    ]))
+
+    def boom(**_kw):
+        raise RuntimeError("solver exploded")
+
+    monkeypatch.setattr("app.api.chat.run_plan_pipeline", boom)
+    events = _post(client, "预算5000玩1天", session="sc-err", user="u-err")
+    assert events[-1][0] == "error"
+    assert "solver exploded" in events[-1][1]["detail"]
+    run = client.get(f"/api/runs/{events[0][1]['trace_id']}").json()
+    assert run["status"] == "failed"

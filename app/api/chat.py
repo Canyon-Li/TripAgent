@@ -1,14 +1,17 @@
 """POST /api/chat（§10 SSE 流式）——阶段 2 多轮约束演进对话主链路（§7.1 / B12）。
 
 单轮流程（每轮全量重规划，B12）：
-    observation 落账 → Memory.read（权威注入，B15）
-    → Resolver（白名单 function calling，B14；LLM 缺失/失败 → 规则模板降级）
-    → merge（显式优先、记忆兜底）→ apply_assertions 写回 Ledger + refresh Views
+    observation 落账 → Memory.read（权威注入）
+    → Resolver（白名单 function calling，B14；recall_constraint 由运行时检索
+      memory_views 并回灌模型，B15；LLM 缺失/失败 → 规则模板降级）
+    → merge（显式优先、记忆兜底；recall 召回值与权威通道同源去重合并，B15）
+    → apply_assertions 写回 Ledger + refresh Views
     → run_plan_pipeline（solve + verify，与 /api/plan 同一条确定性路径）
     → Responder（LLM 解释 / 降级模板）
 SSE 事件：start / stage / clarification / delta / done / error。
 runs/spans 全记录：resolver.resolve、memory.read、memory.write、
-solver.solve、verifier.check、responder.render（trace_id 贯穿）。
+solver.solve、verifier.check、responder.render（trace_id 贯穿）；
+异常 → error 事件 + run 落 failed；客户端断开 → interrupted（§7.1）。
 """
 
 from __future__ import annotations
@@ -17,7 +20,7 @@ import datetime as dt
 import json
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
@@ -26,12 +29,13 @@ from pydantic import ValidationError
 
 from app.config import get_settings
 from app.db import runs as runs_db
-from app.db.repository import get_repository
+from app.db.repository import DataRepository, get_repository
 from app.llm.adapter import LLMAdapter, UsageMeter, get_llm, llm_available
 from app.llm.tools import PREFERENCE_KEYWORDS
 from app.memory import ledger, policy, service, views
+from app.memory.service import ConstraintOrigin
 from app.runtime.pipeline import run_plan_pipeline
-from app.runtime.resolver import resolve
+from app.runtime.resolver import RecallLookup, resolve
 from app.runtime.responder import compose_reply, split_deltas
 from app.schemas import AppliedConstraintsOut, ChatRequest, PlanRequest
 
@@ -64,6 +68,46 @@ def _build_history(session_id: str) -> list[dict[str, str]]:
         {"role": "user", "content": f"[第{o['content']['turn']}轮] {o['content']['text']}"}
         for o in obs[-HISTORY_WINDOW:-1]  # 本轮原话在 resolver 里单独作为最后一条 user
     ]
+
+
+def _recall_lookup(session_id: str, user_id: str) -> RecallLookup:
+    """B15：recall_constraint 的执行体——同源 memory_views，按 scope 链检索。"""
+    chain = [f"session:{session_id}", f"user:{user_id}", "global"]
+
+    def lookup(key: str) -> dict[str, Any] | None:
+        for scope in chain:
+            v = views.current_view(scope)
+            if v is None:
+                continue
+            constraints = v["value"]["constraints"]
+            if key in constraints:
+                prov = v["value"]["provenance"].get(key, {})
+                return {
+                    "value": constraints[key],
+                    "source": f"memory_views#{v['id']}",
+                    "turn": prov.get("turn") or 0,
+                    "scope": scope,
+                }
+        return None
+
+    return lookup
+
+
+def _merge_recall_into_memory(
+    memory: list[ConstraintOrigin],
+    recalled: dict[str, dict[str, Any]],
+) -> list[ConstraintOrigin]:
+    """B15 两路合并去重：recall 召回值与 Memory.read 同源，正常被权威通道覆盖；
+    权威链未含该字段时以 recall 结果补位（链路完备性，测试可注入构造覆盖）。"""
+    have = {c.field for c in memory}
+    extra = [
+        ConstraintOrigin(
+            field=key, value=hit["value"], source=hit["source"],
+            scope=hit.get("scope", "recall"), turn=hit.get("turn", 0),
+        )
+        for key, hit in recalled.items() if key not in have
+    ]
+    return memory + extra
 
 
 def _normalize_fields(
@@ -125,8 +169,6 @@ def _chat_stream(req: ChatRequest, llm: LLMAdapter | None) -> Iterator[str]:
     t0 = time.perf_counter()
     settings = get_settings()
     repo = get_repository()
-    poi_index = tuple((p.id, p.name) for p in repo.pois)
-    poi_catalog = "\n".join(f"{pid} = {name}" for pid, name in poi_index)
     meter = UsageMeter()
 
     trace_id = f"tr-{uuid.uuid4().hex[:12]}"
@@ -148,6 +190,31 @@ def _chat_stream(req: ChatRequest, llm: LLMAdapter | None) -> Iterator[str]:
         )
         return latency
 
+    try:
+        yield from _run_turn(req, llm, repo=repo, trace_id=trace_id, meter=meter, finish=_finish)
+    except GeneratorExit:
+        # 客户端断开：run 标 interrupted（§7.1 优雅关闭语义），不 yield（协议禁止）
+        _finish("interrupted")
+        raise
+    except Exception as exc:  # noqa: BLE001 —— SSE error 统一出口，run 落 failed
+        _finish("failed")
+        yield _sse("error", {"detail": f"{type(exc).__name__}: {exc}",
+                             "trace_id": trace_id})
+
+
+def _run_turn(
+    req: ChatRequest,
+    llm: LLMAdapter | None,
+    *,
+    repo: DataRepository,
+    trace_id: str,
+    meter: UsageMeter,
+    finish: Callable[[str], int],
+) -> Iterator[str]:
+    """单轮主体（§7.1 主链路）；成功路径内部自行 finish("succeeded")。"""
+    poi_index = tuple((p.id, p.name) for p in repo.pois)
+    poi_catalog = "\n".join(f"{pid} = {name}" for pid, name in poi_index)
+
     # ---- 1. 本轮落账（observation）----
     turn = policy.next_turn(req.session_id)
     policy.record_observation(
@@ -162,7 +229,7 @@ def _chat_stream(req: ChatRequest, llm: LLMAdapter | None) -> Iterator[str]:
           sources={c.field: c.source for c in memory})
     yield _sse("stage", {"name": "memory", "status": "done", "fields": len(memory)})
 
-    # ---- 3. Resolver（白名单 function calling / 降级）----
+    # ---- 3. Resolver（白名单 function calling 回路 + B15 recall 检索 / 降级）----
     r0 = _now_ms()
     outcome = resolve(
         llm,
@@ -172,12 +239,13 @@ def _chat_stream(req: ChatRequest, llm: LLMAdapter | None) -> Iterator[str]:
         meter=meter,
         poi_index=poi_index,
         poi_catalog=poi_catalog,
+        recall_lookup=_recall_lookup(req.session_id, req.user_id),
     )
     fields, norm_violations = _normalize_fields(outcome.fields, poi_index)
     outcome.guardrail_violations += norm_violations
     _span(trace_id, "resolver.resolve", r0,
           kind=outcome.kind, fields=fields, degraded=outcome.degraded,
-          recalled_keys=outcome.recalled_keys,
+          recalled=dict(outcome.recalled), recalled_misses=outcome.recalled_misses,
           guardrail_violations=outcome.guardrail_violations, turn=turn)
     yield _sse("stage", {
         "name": "resolver", "status": "done", "kind": outcome.kind,
@@ -186,7 +254,7 @@ def _chat_stream(req: ChatRequest, llm: LLMAdapter | None) -> Iterator[str]:
     })
 
     def _clarify(field: str, reason: str) -> Iterator[str]:
-        latency = _finish()
+        latency = finish()
         yield _sse("clarification", {"field": field, "reason": reason, "turn": turn})
         yield _sse("done", {
             "type": "clarification", "trace_id": trace_id, "turn": turn,
@@ -199,8 +267,10 @@ def _chat_stream(req: ChatRequest, llm: LLMAdapter | None) -> Iterator[str]:
         yield from _clarify(field, reason)
         return
 
-    # ---- 4. merge（显式优先、记忆兜底）→ 硬字段检查 ----
-    merged = service.merge_constraints(fields, memory, turn=turn)
+    # ---- 4. merge（显式优先、记忆兜底；recall 两路同源去重，B15）→ 硬字段检查 ----
+    merged = service.merge_constraints(
+        fields, _merge_recall_into_memory(memory, outcome.recalled), turn=turn
+    )
     final = service.origins_to_fields(merged)
     if not final.get("budget"):
         yield from _clarify(
@@ -262,7 +332,7 @@ def _chat_stream(req: ChatRequest, llm: LLMAdapter | None) -> Iterator[str]:
 
     plan_resp.cost.token_in = meter.token_in
     plan_resp.cost.token_out = meter.token_out
-    latency = _finish()
+    latency = finish()
     plan_resp.cost.latency_ms = latency
     yield _sse("done", {
         "type": "plan", "trace_id": trace_id, "turn": turn,
@@ -272,7 +342,8 @@ def _chat_stream(req: ChatRequest, llm: LLMAdapter | None) -> Iterator[str]:
             "read": [c.to_public() for c in memory],
             "written": report.written,
             "superseded": report.superseded,
-            "recalled_keys": outcome.recalled_keys,
+            "recalled": outcome.recalled,
+            "recalled_misses": outcome.recalled_misses,
             "guardrail_violations": outcome.guardrail_violations,
         },
         "llm": meter.as_dict(),

@@ -76,17 +76,57 @@ def test_tool_call_limit_truncated():
     fake = FakeLLM([tool_call_result(*five)])
     out = resolve(fake, message="x", active_constraints={}, history=[], meter=_meter())
     assert "too_many_tool_calls:5>3" in out.guardrail_violations
-    assert len(out.recalled_keys) == 3  # 截断到上限
+    # 截断到 3 条且均执行（无 lookup → 未命中）；回灌额度耗尽 → 循环护栏
+    assert len(out.recalled_misses) == 3
+    assert any(v.startswith("tool_call_budget_exhausted") for v in out.guardrail_violations)
 
 
-def test_recall_constraint_recorded():
+def test_recall_same_round_with_submit_recorded_as_miss():
+    """同轮 recall + submit：submit 即终态；未传 lookup 时 recall 记为未命中。"""
     fake = FakeLLM([tool_call_result(
         ("recall_constraint", json.dumps({"key": "budget"})),
         ("submit_plan_request", json.dumps({"days": 2})),
     )])
     out = resolve(fake, message="还是按上次那个预算，玩2天",
                   active_constraints={}, history=[], meter=_meter())
-    assert out.kind == "plan" and out.recalled_keys == ["budget"]
+    assert out.kind == "plan" and out.fields == {"days": 2}
+    assert out.recalled == {} and out.recalled_misses == ["budget"]
+
+
+def test_recall_loop_executes_lookup_and_feeds_tool_result_back():
+    """B15 真实回路：模型 recall → 运行时检索 memory_views 同源值 → tool 结果
+    回灌 → 模型下一轮 submit；LLM 收到的消息含 tool role 回复。"""
+    fake = FakeLLM([
+        tool_call_result(("recall_constraint", json.dumps({"key": "budget"}))),
+        tool_call_result(("submit_plan_request", json.dumps({"days": 2}))),
+    ])
+    lookup = lambda key: (  # noqa: E731 —— 测试内联
+        {"value": 8000, "source": "memory_views#9", "turn": 1, "scope": "user:u-a"}
+        if key == "budget" else None
+    )
+    out = resolve(fake, message="还是按上次那个预算，玩2天",
+                  active_constraints={}, history=[], meter=_meter(),
+                  recall_lookup=lookup)
+    assert out.kind == "plan" and out.fields == {"days": 2}
+    assert out.recalled["budget"]["value"] == 8000
+    assert out.recalled["budget"]["source"] == "memory_views#9"
+    assert fake.calls[1]["messages"][-1]["role"] == "tool"
+    assert json.loads(fake.calls[1]["messages"][-1]["content"])["value"] == 8000
+
+
+def test_recall_lookup_miss_reaches_model():
+    fake = FakeLLM([
+        tool_call_result(("recall_constraint", json.dumps({"key": "hotel"}))),
+        tool_call_result(("ask_clarification", json.dumps(
+            {"field": "hotel", "reason": "没有该历史约束"}))),
+    ])
+    out = resolve(fake, message="还住上次那家酒店", active_constraints={}, history=[],
+                  meter=_meter(), recall_lookup=lambda _k: None)
+    assert out.kind == "clarification"
+    assert out.recalled_misses == ["hotel"]
+    tool_msg = fake.calls[1]["messages"][-1]
+    assert json.loads(tool_msg["content"]) == {
+        "key": "hotel", "found": False, "note": "记忆视图（memory_views）中无该字段"}
 
 
 def test_no_tool_call_falls_to_clarification():
