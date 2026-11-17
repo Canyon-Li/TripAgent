@@ -17,12 +17,19 @@ import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 
-@pytest.fixture(scope="session")
-def client() -> TestClient:
+@pytest.fixture(scope="session", autouse=True)
+def _db():
+    """session 级建表（与 Alembic 迁移同构）；不依赖 client 的纯 DB 测试也需要。"""
     from app.db import models  # noqa: F401  —— 确保 Base 注册全部表
     from app.db.base import Base, engine
+
+    Base.metadata.create_all(engine)
+    yield
+
+
+@pytest.fixture(scope="session")
+def client(_db) -> TestClient:
     from app.main import app
 
-    Base.metadata.create_all(engine)  # 测试库直接建表（与 Alembic 迁移同构）
     with TestClient(app) as c:
         yield c
