@@ -7,7 +7,12 @@ import json
 import pytest
 
 from app.llm import adapter as llm_adapter
-from app.llm.tools import TOOLS_SCHEMA, WHITELIST, validate_tool_call
+from app.llm.tools import (
+    TOOLS_SCHEMA,
+    WHITELIST,
+    SubmitPlanRequestArgs,
+    validate_tool_call,
+)
 from app.runtime.resolver import (
     build_resolver_messages,
     resolve,
@@ -26,6 +31,33 @@ def test_whitelist_exactly_three_tools_schema_names():
     """B14：恰好 3 个白名单工具，schema 名与白名单一致。"""
     names = {t["function"]["name"] for t in TOOLS_SCHEMA}
     assert names == WHITELIST == {"submit_plan_request", "ask_clarification", "recall_constraint"}
+
+
+def test_json_schema_numeric_bounds_match_pydantic():
+    """契约：submit_plan_request 的 JSON Schema 数值范围与 pydantic 参数约束一致
+    （tools.py docstring 声明「由 tests 契约断言守住」——本测试即该断言）。"""
+    import annotated_types as at
+
+    props = next(
+        t["function"]["parameters"]["properties"]
+        for t in TOOLS_SCHEMA if t["function"]["name"] == "submit_plan_request"
+    )
+
+    def bounds(name: str) -> tuple:
+        metas = SubmitPlanRequestArgs.model_fields[name].metadata
+        ge = next((m.ge for m in metas if isinstance(m, at.Ge)), None)
+        le = next((m.le for m in metas if isinstance(m, at.Le)), None)
+        gt = next((m.gt for m in metas if isinstance(m, at.Gt)), None)
+        return ge, le, gt
+
+    for field, sk_min, sk_max in [("days", "minimum", "maximum"),
+                                  ("daily_minutes_cap", "minimum", "maximum"),
+                                  ("confidence", "minimum", "maximum")]:
+        ge, le, _ = bounds(field)
+        assert props[field][sk_min] == ge, field
+        assert props[field][sk_max] == le, field
+    _, _, gt = bounds("budget")
+    assert props["budget"]["exclusiveMinimum"] == gt
 
 
 def test_resolve_normal_plan_path():

@@ -67,7 +67,10 @@ SUBMIT_PROPS: dict[str, Any] = {
     },
     "must_visit": {"type": "array", "items": {"type": "string"}, "description": "必去 POI id"},
     "preferences": {"type": "array", "items": {"type": "string"}, "description": "偏好类目"},
-    "confidence": {"type": "number", "description": "抽取置信度 0-1"},
+    "confidence": {
+        "type": "number", "minimum": 0.0, "maximum": 1.0,
+        "description": "抽取置信度 0-1",
+    },
 }
 
 TOOLS_SCHEMA: list[dict[str, Any]] = [
