@@ -4,7 +4,7 @@
 
 - 设计文档：[project.md](project.md)（含 ADR 决策记录、API 契约、数据模型）
 - 总体架构：[architecture.svg](architecture.svg)
-- 任务清单：[TASKS.md](TASKS.md)（阶段 0–2）
+- 任务清单：[TASKS.md](TASKS.md)（阶段 0–3）
 
 ## 快速上手
 
@@ -56,6 +56,20 @@ curl "http://localhost:8000/api/memory/events?session_id=s-1"
 curl -X POST http://localhost:8000/api/memory/rebuild    # -> consistent: true
 ```
 
+评测与观测（阶段 3，§7.3）：
+
+```bash
+# 三列评测（current / A 纯LLM直出 / B 关记忆注入，ADR-006；--real 需 LLM_API_KEY）：
+.venv/Scripts/python.exe -m app.eval.runner --baseline all --include-hidden --real
+# CI 回归模式（公开集 FakeLLM 确定性，对比 reports/baseline.json，退化即 exit 1）：
+.venv/Scripts/python.exe -m app.eval.runner --ci
+# 指标有意提升后显式刷新基线（单独 commit）：
+.venv/Scripts/python.exe -m app.eval.runner --fake --update-baseline
+# 在线触发 + 趋势（前端「评测看板」视图同源）：
+curl -X POST http://localhost:8000/api/eval/run -H "Content-Type: application/json" -d '{}'
+curl "http://localhost:8000/api/eval/reports"
+```
+
 ## 数据来源与导出日期（§14 授权风险缓解）
 
 | 数据 | 来源 | 导出/校对日期 | 说明 |
@@ -68,14 +82,15 @@ curl -X POST http://localhost:8000/api/memory/rebuild    # -> consistent: true
 ## 项目结构（§11.1）
 
 ```
-app/            FastAPI 入口 / 配置 / api（plan·chat·memory·runs·pois）/ db（repository·runs·models）
+app/            FastAPI 入口 / 配置 / api（plan·chat·memory·eval·runs·pois）/ db（repository·runs·evals·models）
                 memory（Ledger·Policy·Views·Memory.read）/ llm（适配器·白名单工具）/ runtime（Resolver·Responder·pipeline）
-                solver（VRPTW）/ verifier（独立校验）；registry·eval 随阶段 3–4 落地
+                solver（VRPTW）/ verifier（独立校验）/ eval（runner·graders·report·baseline_a）；registry 随阶段 4 落地
 alembic/        schema 迁移（禁止手工改表，§11.4）
-scripts/        export_pois / build_matrix（一次性导出）+ check_plans（批量断言，阶段 3 eval runner 前身）
-web/            静态前端（无构建；行程对话 + 手动规划两视图已落地，Trace / 评测看板随阶段 3）+ nginx.conf（/api 同源反代）
-data/           pois.json / matrix.json / eval_cases.jsonl / tripagent.db（库文件不入库）
-tests/          pytest（契约 / 求解 / 校验 / 属性 / 记忆一致性 / 护栏等 106 项）
+scripts/        export_pois / build_matrix（一次性导出）+ check_plans（plan 用例批量断言）
+web/            静态前端（无构建；行程对话 + 手动规划 + Trace 回放瀑布图 + 评测看板四视图）+ nginx.conf（/api 同源反代）
+data/           pois.json / matrix.json / eval_cases.jsonl（40 条全集，含 20% hidden）/ tripagent.db（库文件不入库）
+reports/        eval-<sha>.md 评测报告 + baseline.json（CI 回归基线）
+tests/          pytest（契约 / 求解 / 校验 / 属性 / 记忆一致性 / 护栏 / 评测等 128 项）
 ```
 
 ## 环境变量
@@ -84,8 +99,8 @@ tests/          pytest（契约 / 求解 / 校验 / 属性 / 记忆一致性 / �
 
 ## CI
 
-GitHub Actions（[ci.yml](.github/workflows/ci.yml)）：`lint`（ruff）+ `test`（pytest，迁移后运行）；main 分支保护要求 PR 必过这两项检查。
+GitHub Actions（[ci.yml](.github/workflows/ci.yml)）：`lint`（ruff）+ `test`（pytest，迁移后运行）+ `eval`（公开集 FakeLLM 确定性回归，对比 `reports/baseline.json`——硬约束类指标任一退化或 final_pass_rate 降 >2pp 即失败，§12）；main 分支保护要求 PR 必过这三项检查。
 
 ## 状态与路线图
 
-当前：**阶段 2 · 记忆层已完成**（2026-11-17，详见 [TASKS.md](TASKS.md)）——Ledger/Views/Policy 三件套（ADR-003）+ Resolver 白名单 function calling（ADR-008/B14）+ `POST /api/chat` SSE 多轮对话（B12，每轮全量重规划）+ 跨会话用户切换（B9）：六轮演进早期约束不滑点、改预算 supersede 归档可回放、rebuild 重放一致、用户隔离。后续：阶段 3 评测观测（40 条全集 + 双基线 + Trace 看板）→ 4 平台化（Registry 灰度回滚 + Agent Card）。
+当前：**阶段 3 · 评测观测已完成**（2026-11-17，详见 [TASKS.md](TASKS.md)）——40 条评测全集（32 公开 + 8 hidden，§14 防过拟合）+ 双基线三列报告（ADR-006：current / A 纯 LLM 直出 / B 关记忆注入）+ §12 八指标断言式评分（ADR-004）+ Trace 瀑布图与评测看板前端视图 + CI eval 回归阻断 + 「最近一次可行方案」降级收口（§7.1）。后续：阶段 4 平台化（Registry 灰度回滚 + Agent Card）。

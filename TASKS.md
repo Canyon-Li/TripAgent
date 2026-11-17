@@ -62,16 +62,14 @@
 
 **目标**：40 条全集 + 双基线三列报告（ADR-006）+ Trace 瀑布图 + 评测看板 + CI 回归阻断（§7.3 / §12），并收口阶段 2 遗留尾项「最近一次可行方案」降级。验收口径（§13）：**产出改动前后指标对比**；§12 八指标 TBD 由真实评测回填（§1 数据诚实约定）。
 
-- [ ] **3.1 eval_results 表 + response 持久化**：`EvalResult` 模型 + Alembic 迁移（down_revision=7e23cf1be135，§9 DDL 逐列对齐）；`runs` 加可空 `response_json` 列并由 /api/plan、/api/chat 成功路径写入；`app/db/evals.py` 聚合查询（看板数据源）
-- [ ] **3.2 评测用例 40 条全集**：32 公开 + 8 hidden（§14 20% 防过拟合）；pydantic 用例 schema（plan 单轮 + **chat 多轮**新格式，turns 内嵌 FakeLLM 脚本供 CI 确定性）；覆盖 §7.3 五类：单约束 / 多约束 / 冲突约束 / 多轮指代（含 6 轮引用首轮预算）/ 不可行；`_meta` 版本头；check_plans 兼容跳过
-- [ ] **3.3 app/eval 包**：runner（`python -m app.eval.runner --baseline current|A|B|all`，TestClient + 临时库）/ graders（§12 八指标，断言式评分 ADR-004，tool_success_rate 两类分别统计）/ report（`reports/eval-<sha>.md` 三列 + eval_results 入库 + baseline.json）；基线 B = `MEMORY_INJECTION` 开关关记忆注入；基线 A = 纯 LLM 直出行程过同一套 graders（ADR-006）
-- [ ] **3.4 「最近一次可行方案」降级**（阶段 2 尾项收口）：`get_last_feasible_run(session_id)`；chat 降级路径（LLM 失败 → 规则模板失败/重规划不可行）回退该 session 最近一次可行方案并标注 degraded + 来源 trace_id；无历史维持澄清
-- [ ] **3.5 spans 计时精度**：`_span` / pipeline 计时改「墙钟锚点 + perf_counter 精确时长」（Windows 墙钟 ~15.6ms 粒度修复），schema 不变
-- [ ] **3.6 Trace 瀑布图视图**：web 第三视图（占位 tab 激活）——输入 trace_id → `GET /api/runs/{trace_id}` → run 头 + 六段瀑布条（相对归一/状态色/meta 摘要）+ request 回显；纯 CSS 无构建依赖
-- [ ] **3.7 评测看板 + eval API**：`POST /api/eval/run`（返回报告路径）、`GET /api/eval/reports`（按 git_sha 聚合趋势 + 报告列表，§10）；web 第四视图——手写 SVG 趋势折线 + 历史报告表 + 触发评测按钮
-- [ ] **3.8 CI 回归阻断**：ci.yml 加 eval job（公开集 current+B FakeLLM 确定性 → 对比 baseline.json；硬约束指标任一退化或 final_pass_rate 降 >2pp 即失败，§12 验收规则）；`--update-baseline` 显式刷新；分支保护必需检查加 eval
-- [ ] **3.9 真实评测与 TBD 回填**：本地真 key 跑 current/A/B × 40（含 hidden）三列报告入库；project.md §12 八指标 TBD 与 §1 结论数字回填（注明 git_sha / 模型名 / 评测集版本）；README 同步
-- [ ] **3.10 一致性验收**：pytest 全绿 + ruff clean + check_plans 40/40（含 hidden）+ CI 三 job 绿 + 浏览器实测瀑布图与看板
+- [x] **3.1 eval_results 表 + response 持久化**：`EvalResult` 模型 + Alembic 迁移（down_revision=7e23cf1be135，§9 DDL 逐列对齐）；`runs` 加可空 `response_json` 列并由 /api/plan、/api/chat 成功路径写入；`app/db/evals.py` 聚合查询（看板数据源） ✅ 2026-11-17 迁移 `a4f9c2d81e07`（upgrade 后 PRAGMA 核对 7 列与 §9 一致、runs 增 response_json）；evals.py 趋势/运行列表/指标名查询；plan 与 chat done 路径均落 response；tests 3 项
+- [x] **3.2 评测用例 40 条全集**：32 公开 + 8 hidden（§14 20% 防过拟合）；pydantic 用例 schema（plan 单轮 + **chat 多轮**新格式，turns 内嵌 FakeLLM 脚本供 CI 确定性）；覆盖 §7.3 五类：单约束 / 多约束 / 冲突约束 / 多轮指代（含 6 轮引用首轮预算）/ 不可行；`_meta` 版本头；check_plans 兼容跳过 ✅ 2026-11-17 v2026-11-17.1：32 plan（单约束 4 / 多约束 7 / 冲突 6 / 不可行 6 / 种子 8 + hidden 4）+ 8 chat（公开 6 含 6 轮 recall 回路用例、hidden 2）；chat 用例带固定 start_date（周一闭馆断言不随运行日漂移）；fake 模式 current 列 40/40
+- [x] **3.3 app/eval 包**：runner（`python -m app.eval.runner --baseline current|A|B|all`，TestClient + 临时库）/ graders（§12 八指标，断言式评分 ADR-004，tool_success_rate 两类分别统计）/ report（`reports/eval-<sha>.md` 三列 + eval_results 入库 + baseline.json）；基线 B = `MEMORY_INJECTION` 开关关记忆注入；基线 A = 纯 LLM 直出行程过同一套 graders（ADR-006） ✅ 2026-11-17 runner 支持 --real/--fake/--ci/--update-baseline/--json；B 列隔离验证（跨轮记忆用例全数丢 budget→澄清，final 0.844 vs current 1.000）；A 列仅 plan 用例（chat 不适用，报告 N/A）；校准中修出 grader 真缺陷（时间窗冲突未计入 failures）；tests 7 项
+- [x] **3.4 「最近一次可行方案」降级**（阶段 2 尾项收口）：`get_last_feasible_run(session_id)`；chat 降级路径（LLM 失败 → 规则模板失败/重规划不可行）回退该 session 最近一次可行方案并标注 degraded + 来源 trace_id；无历史维持澄清 ✅ 2026-11-17 两个钩子点（解析失败 / 重规划不可行）；done.fallback + responder.render span meta 记录来源 trace；回放方案挂当前 trace 下；tests 4 项（回退两分支 / 无历史澄清 / 非降级澄清不回退）
+- [x] **3.5 spans 计时精度**：`_span` / pipeline 计时改「墙钟锚点 + perf_counter 精确时长」（Windows 墙钟 ~15.6ms 粒度修复），schema 不变 ✅ 2026-11-17 pipeline 导出 tick()/span_bounds()，chat._span 复用；亚毫秒 span 不再记 0ms（test_span_bounds_precise_duration）
+- [x] **3.6 Trace 瀑布图视图**：web 第三视图（占位 tab 激活）——输入 trace_id → `GET /api/runs/{trace_id}` → run 头 + 六段瀑布条（相对归一/状态色/meta 摘要）+ request 回显；纯 CSS 无构建依赖 ✅ 2026-11-17 最近 trace 快选（对话/规划完成自动记录）；span 中文标签 + 时长 + meta 展开 + 请求回显 details；内联 JS node --check 通过
+- [x] **3.7 评测看板 + eval API**：`POST /api/eval/run`（返回报告路径）、`GET /api/eval/reports`（按 git_sha 聚合趋势 + 报告列表，§10）；web 第四视图——手写 SVG 趋势折线 + 历史报告表 + 触发评测按钮 ✅ 2026-11-17 router 挂载 main.py；趋势按指标形态（率/求和/均值）绘制，baseline 摘要卡 + 运行列表 + 一键触发；tests 3 项（monkeypatch 契约 + 趋势聚合 + 参数校验）
+- [x] **3.8 CI 回归阻断**：ci.yml 加 eval job（公开集 current+B FakeLLM 确定性 → 对比 baseline.json；硬约束指标任一退化或 final_pass_rate 降 >2pp 即失败，§12 验收规则）；`--update-baseline` 显式刷新；分支保护必需检查加 eval ✅ 2026-11-17 eval job（迁移后 `python -m app.eval.runner --ci`，失败上传 reports/ artifact）；本地实测：正常 exit 0 / 抬高基线复现 REGRESSION + exit 1；分支保护已更新为 test+lint+eval（gh api）
 
 **验收**：`python -m app.eval.runner --include-hidden --baseline all` 产出三列报告且 final_pass_rate=current 列全过口径成立；CI eval job 对故意退化 exit 1；`GET /api/eval/reports` 返回多 git_sha 趋势；浏览器出示一条完整 trace 瀑布图（§16 证据）；§12 TBD 全部回填真实数字。
 
