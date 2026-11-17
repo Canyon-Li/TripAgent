@@ -70,8 +70,10 @@
 - [x] **3.6 Trace 瀑布图视图**：web 第三视图（占位 tab 激活）——输入 trace_id → `GET /api/runs/{trace_id}` → run 头 + 六段瀑布条（相对归一/状态色/meta 摘要）+ request 回显；纯 CSS 无构建依赖 ✅ 2026-11-17 最近 trace 快选（对话/规划完成自动记录）；span 中文标签 + 时长 + meta 展开 + 请求回显 details；内联 JS node --check 通过
 - [x] **3.7 评测看板 + eval API**：`POST /api/eval/run`（返回报告路径）、`GET /api/eval/reports`（按 git_sha 聚合趋势 + 报告列表，§10）；web 第四视图——手写 SVG 趋势折线 + 历史报告表 + 触发评测按钮 ✅ 2026-11-17 router 挂载 main.py；趋势按指标形态（率/求和/均值）绘制，baseline 摘要卡 + 运行列表 + 一键触发；tests 3 项（monkeypatch 契约 + 趋势聚合 + 参数校验）
 - [x] **3.8 CI 回归阻断**：ci.yml 加 eval job（公开集 current+B FakeLLM 确定性 → 对比 baseline.json；硬约束指标任一退化或 final_pass_rate 降 >2pp 即失败，§12 验收规则）；`--update-baseline` 显式刷新；分支保护必需检查加 eval ✅ 2026-11-17 eval job（迁移后 `python -m app.eval.runner --ci`，失败上传 reports/ artifact）；本地实测：正常 exit 0 / 抬高基线复现 REGRESSION + exit 1；分支保护已更新为 test+lint+eval（gh api）
+- [x] **3.9 真实评测与 TBD 回填**：本地真 key 跑 current/A/B × 40（含 hidden）三列报告入库；project.md §12 八指标 TBD 与 §1 结论数字回填（注明 git_sha / 模型名 / 评测集版本）；README 同步 ✅ 2026-11-17 deepseek-flash · git 7731d7c · 评测集 v2026-11-17.1：**current 39/40（final 0.975）/ A 0/32（0.000——纯 LLM 直出在校验器下平均 5+ 处冲突/例、不可行请求全部硬凑）/ B 32/40（0.800）**；memory_recall@6 0.875 vs B 0.125；时间窗冲突 0 vs A 168。唯一失败用例（chat_six_turn_reference）如实记录：真实 LLM 第 6 轮从对话 history 复读出正确预算值但绕过记忆通道（source=request），暴露真实行为；A 列 P95/cost 本次未计量（计量逻辑已补齐，后续运行生效）。报告 `reports/eval-7731d7c.md`；project.md §1/§12/§13 回填
+- [x] **3.10 一致性验收**：pytest 全绿 + ruff clean + check_plans（plan 子集含 hidden）全过 + CI eval 阻断实测 + 浏览器实测瀑布图与看板 ✅ 2026-11-17 pytest 129 绿 + ruff clean；check_plans 32/32 + runner fake 40/40；回归阻断抬高基线复现 exit 1；分支保护 test+lint+eval 生效；浏览器（Playwright + 视觉复核）实测六段瀑布与看板 SVG 趋势/基线卡/运行列表，页面零 JS 错误
 
-**验收**：`python -m app.eval.runner --include-hidden --baseline all` 产出三列报告且 final_pass_rate=current 列全过口径成立；CI eval job 对故意退化 exit 1；`GET /api/eval/reports` 返回多 git_sha 趋势；浏览器出示一条完整 trace 瀑布图（§16 证据）；§12 TBD 全部回填真实数字。
+**验收**：`python -m app.eval.runner --include-hidden --baseline all` 产出三列报告且 final_pass_rate=current 列全过口径成立；CI eval job 对故意退化 exit 1；`GET /api/eval/reports` 返回多 git_sha 趋势；浏览器出示一条完整 trace 瀑布图（§16 证据）；§12 TBD 全部回填真实数字。　✅ 2026-11-17 全过：三列报告 current 0.975 / A 0.000 / B 0.800（40 条含 hidden，deepseek-flash）；回归阻断实测 exit 1（REGRESSION 消息 + 退出码）；/api/eval/reports 多 sha 趋势（eval_results 入库）；瀑布图六段浏览器出示（含真实 LLM trace）；project.md §12 八指标 + §1 结论数字全部真实回填（数据诚实约定）。**阶段 3 冻结。**
 
 ---
 

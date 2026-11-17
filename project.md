@@ -47,7 +47,7 @@
 
 设计动机来自岗位 JD 的职责分布：五条职责中仅第 1 条是 Agent 应用开发，其余四条（框架稳定性、记忆一致性、评测观测、注册管理发现）均为平台工程。因此项目不以"生成一份好看的攻略"为目标，而以"一个能上线、可评测、可回滚的 Agent 系统"为目标。
 
-**一句话可验证结论**：在 40 条带标准答案的评测集上，加入记忆层与独立校验器后，第 6 轮对话的硬约束召回率与行程可执行率相对双基线（A：纯 LLM 直接生成；B：完整管线关闭记忆注入，见 ADR-006）提升 `TBD`，且每次代码改动都能自动产出回归对比报告。
+**一句话可验证结论**：在 40 条带标准答案的评测集上，加入记忆层与独立校验器后，第 6 轮对话的硬约束召回率与行程可执行率相对双基线（A：纯 LLM 直接生成；B：完整管线关闭记忆注入，见 ADR-006）提升——**final_pass_rate：current 0.975 vs A 0.000（+97.5pp）vs B 0.800（+17.5pp）；memory_recall@6：0.875 vs B 0.125（+75pp）；时间窗冲突 0 vs A 168**（2026-11-17 实测，deepseek-flash，[报告](reports/eval-7731d7c.md)），且每次代码改动都能自动产出回归对比报告（CI `eval` job）。
 
 ---
 
@@ -176,7 +176,7 @@
 ### ADR-006：评测采用双基线对比
 
 - **状态**：Accepted（2026-11-17，边界确认 B10）
-- **上下文**：§1 的"相对基线提升 `TBD`"需要明确参照物；单一基线无法同时支撑"约束可靠性"与"记忆滑点"两个叙事。
+- **上下文**：§1 的"相对基线提升"（阶段 3 实测：current 0.975 vs A 0.000 vs B 0.800）需要明确参照物；单一基线无法同时支撑"约束可靠性"与"记忆滑点"两个叙事。
 - **备选**：A) 仅纯 LLM 基线（差距大但说不清记忆层贡献）；B) 仅无记忆基线（严谨但缺少"为什么不让 LLM 排程"的直接证据）。
 - **决定**：双基线。基线 A = 纯 LLM 直接生成行程（复现 TripGenie 式失效）；基线 B = 完整管线但关闭记忆注入（隔离记忆层贡献）。评测报告同时呈现 current / A / B 三列。
 - **后果**：可拆分"求解器+校验器贡献"（对比 A）与"记忆层贡献"（对比 B）；代价是评测运行次数 ×3，token 成本相应增加。
@@ -562,16 +562,21 @@ python -m app.eval.runner --baseline
 
 | 指标 | 定义 | 目标 |
 | --- | --- | --- |
-| `hard_constraint_pass_rate` | 硬约束全部满足的用例占比 | `TBD`（目标 ≥ 0.95） |
-| `time_window_violations` | 校验器检出的闭馆/超时冲突总数 | 0 |
-| `budget_accuracy` | 重算预算与声明预算一致且不超支的占比 | 1.00 |
-| `memory_recall@6` | 第 6 轮仍能正确注入首轮硬约束的占比 | `TBD`（相对基线提升） |
-| `tool_success_rate` | 白名单 function calling + capability 调用的成功数 / 总调用，两类分别统计（§7.6） | `TBD` |
-| `p95_latency_ms` | 端到端 P95 | `TBD` |
-| `cost_per_plan` | 单次计划 token 成本 | `TBD` |
-| `final_pass_rate` | 所有适用断言同时通过的用例占比 | `TBD` |
+| `hard_constraint_pass_rate` | 硬约束全部满足的用例占比 | **1.00**（40/40，目标 ≥ 0.95 达成） |
+| `time_window_violations` | 校验器检出的闭馆/超时冲突总数 | **0**（目标 0 达成） |
+| `budget_accuracy` | 重算预算与声明预算一致且不超支的占比 | **1.00** |
+| `memory_recall@6` | 第 6 轮仍能正确注入首轮硬约束的占比 | **0.875**（current）vs **0.125**（B 关记忆）vs 不适用（A） |
+| `tool_success_rate` | 白名单 function calling + capability 调用的成功数 / 总调用，两类分别统计（§7.6） | **FC 0.958 / capability 1.00** |
+| `p95_latency_ms` | 端到端 P95 | **14,445 ms**（真实 LLM 端到端含 chat 多轮；纯 /api/plan 路径 ≈ 2 s） |
+| `cost_per_plan` | 单次计划 token 成本 | **≈1,114 token/例**（deepseek-flash） |
+| `final_pass_rate` | 所有适用断言同时通过的用例占比 | **0.975**（current 39/40）vs **0.000**（A 纯 LLM）vs **0.800**（B 关记忆） |
 
-**验收规则**：任一硬约束类指标退化即视为回归；`final_pass_rate` 相对于 `baseline` 下降超过 2 个百分点时 CI 失败。所有报告必须注明 `git_sha`、模型名与评测集版本，保证可复现。
+> 以上为 2026-11-17 真实评测回填（数据诚实约定）：评测集 v2026-11-17.1（40 条含 8 hidden）、
+> git_sha `7731d7c`、模型 deepseek-flash，报告原文 [reports/eval-7731d7c.md](reports/eval-7731d7c.md)。
+> A 列全败并非意外：纯 LLM 直出行程在校验器下平均每例 5+ 处时间线/闭馆冲突、不可行请求全部硬凑
+> （预算 1 元仍排出付费行程）——即 ADR-006 要复现的失效模式。
+
+**验收规则**：任一硬约束类指标退化即视为回归；`final_pass_rate` 相对于 `baseline` 下降超过 2 个百分点时 CI 失败。所有报告必须注明 `git_sha`、模型名与评测集版本，保证可复现。（已落地：CI `eval` job 对比 `reports/baseline.json`，main 分支保护必需检查 test / lint / eval。）
 
 ---
 
@@ -583,7 +588,7 @@ python -m app.eval.runner --baseline
 | **0 资源就绪** | API key、POI 数据集、Docker Compose、公开 demo、README 架构图 | `docker compose up` 可访问；`/healthz` 返回版本 | 🟡 2026-11-17 基本完成：Windows 本地 compose 验收通过（/healthz 200 含 git_sha、pytest 绿、CI test+lint 绿、pois.json 23 个无缺字段）；VPS 部署验证待做（0.7 尾项） |
 | **1 最小可跑** | 单城 3 日行程、Routing 求解、独立校验器、行程前端 | 40 条用例中时间窗冲突为 0 | ✅ 完成（2026-11-17）：`POST /api/plan` 全链路（两阶段 VRPTW 求解 + 独立校验器 + runs/spans 贯穿 + 前端行程卡 + nginx 同源反代）；10 条种子用例（含 2 hidden）时间窗冲突 0 / 预算违规 0 / 必去覆盖全过，属性测试 120 组随机样本通过，pytest 37 绿 + ruff clean + compose 冒烟通过（40 条全集随阶段 3 补齐，见 TASKS.md） |
 | **2 记忆层** | Ledger / Views / Policy、多轮一致性演示 | 第 6 轮约束回显正确，可回放 Ledger | ✅ 完成（2026-11-17）：memory_events/memory_views 落地（追加写 + supersedes 归档 + 重放重建）；Memory.read scope 链注入（session→user→global、衰减只影响排序不丢硬约束）；Resolver 白名单 function calling（三工具 + 护栏 + 规则模板降级）；`POST /api/chat` SSE 六段 spans；前端对话视图（用户切换/约束来源徽标）；六轮演进召回 / 跨会话注入 / 用户隔离 / rebuild 一致全过（pytest 106 绿）；任务明细见 `TASKS.md` 阶段 2 |
-| **3 评测观测** | 评测集、Trace Store、看板、CI 回归报告 | 产出改动前后指标对比图 | 待开始 |
+| **3 评测观测** | 评测集、Trace Store、看板、CI 回归报告 | 产出改动前后指标对比图 | ✅ 完成（2026-11-17）：40 条全集（32 公开 + 8 hidden，chat 多轮内嵌脚本）+ 双基线三列报告（ADR-006，current 0.975 / A 0.000 / B 0.800）+ §12 八指标真实回填 + Trace 瀑布图与评测看板前端视图 + CI `eval` 回归 job（baseline.json 对比，分支保护 test/lint/eval）+「最近一次可行方案」降级收口；报告 [reports/eval-7731d7c.md](reports/eval-7731d7c.md)，任务明细见 `TASKS.md` 阶段 3 |
 | **4 平台化** | Registry、健康检查、灰度回滚、故障注入测试、只读 Agent Card 导出 | 回滚无需重启；降级路径可用；卡片与 `/api/plan` schema 一致 | 待开始 |
 
 > 时间提示：该岗位 2026-09-15 发布、招满即止，10 月起已陆续发放 offer。**优先完成阶段 0–3**，阶段 4 作为加分演示。范围控制遵循 §3.2。

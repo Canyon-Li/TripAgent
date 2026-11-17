@@ -179,6 +179,47 @@ def test_compare_baseline_rules(tmp_path: Path):
     assert report.compare_baseline({}, tmp_path / "none.json")
 
 
+# ---------- baseline A（离线 stub） ----------
+
+def test_baseline_a_grades_llm_itinerary_and_skips_chat():
+    """A 列仅评 plan 用例：stub LLM 输出可解析行程 → 校验器复核；chat 用例不入列。"""
+    from app.eval import baseline_a
+    from app.llm.adapter import LLMResult
+
+    class StubLLM:
+        def __init__(self, texts):  # noqa: ANN001
+            self.texts = list(texts)
+
+        def chat(self, *, messages, tools=None):  # noqa: ANN001
+            return LLMResult(text=self.texts.pop(0), model="stub")
+
+    plan_ok = PlanCase.model_validate({
+        "case_id": "a_ok", "request": {
+            "days": 1, "budget": 2000, "start_date": "2026-11-18",
+            "must_visit": ["tiananmen_square"]},
+        "asserts": {"status": "feasible"},
+    })
+    plan_bad = PlanCase.model_validate({
+        "case_id": "a_bad", "request": {
+            "days": 1, "budget": 2000, "start_date": "2026-11-18",
+            "must_visit": ["tiananmen_square"]},
+        "asserts": {"status": "feasible"},
+    })
+    chat = ChatCase.model_validate({
+        "case_id": "a_chat", "session_id": "s", "start_date": "2026-11-18",
+        "turns": [{"message": "x"}],
+        "asserts": {"final_status": "feasible"},
+    })
+    good_text = ('{"days":[{"date_index":0,"stops":['
+                 '{"poi":"tiananmen_square","arrive":"09:00","leave":"10:00"}]}]}')
+    llm = StubLLM([good_text, "这不是 JSON"])
+    results = baseline_a.run([plan_ok, plan_bad, chat], llm)
+    assert [r.case_id for r in results] == ["a_ok", "a_bad"]  # chat 不入 A 列
+    assert results[0].kind == "plan"
+    # 解析失败 → 记失败原因（诚实计数，不掩盖）
+    assert any("baseline_A" in f for f in results[1].failures)
+
+
 # ---------- runner 进程内冒烟 ----------
 
 def test_run_eval_smoke_fake(tmp_path: Path, monkeypatch):

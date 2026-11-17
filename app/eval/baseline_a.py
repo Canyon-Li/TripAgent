@@ -8,6 +8,7 @@ graders 断言评分——时间线/闭馆/预算/必去覆盖的违反数即基
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import re
 
@@ -81,12 +82,13 @@ def _to_claims(output: dict) -> tuple[list[DayClaim], list[str]]:
     return claims, errors
 
 
-def run(cases: list[PlanCase], llm) -> list[CaseResult]:  # noqa: ANN001
+def run(cases, llm) -> list[CaseResult]:  # noqa: ANN001
+    """仅评 plan 用例（ADR-006：A = 纯 LLM 直接生成行程；chat 多轮不适用，不入 A 列）。"""
     repo = get_repository()
     catalog = _catalog(repo)
     results: list[CaseResult] = []
 
-    for case in cases:
+    for case in (c for c in cases if isinstance(c, PlanCase)):
         req = case.request
         user_msg = (
             f"行程要求：{req.days} 天，预算 {req.budget} 元（含门票与市内交通），"
@@ -96,11 +98,13 @@ def run(cases: list[PlanCase], llm) -> list[CaseResult]:  # noqa: ANN001
             f"景点清单（id = 名称（属性））：\n{catalog}"
         )
         try:
+            t0 = dt.datetime.now(dt.UTC)
             resp = llm.chat(messages=[
                 {"role": "system", "content": _SYSTEM},
                 {"role": "user", "content": user_msg},
             ])
             text = resp.text or ""
+            llm_ms = (dt.datetime.now(dt.UTC) - t0).total_seconds() * 1000
         except Exception as exc:  # noqa: BLE001 —— LLM 失败本身就是基线 A 的结果
             results.append(_failed(case, f"baseline_A llm error: {exc}"))
             continue
@@ -118,7 +122,8 @@ def run(cases: list[PlanCase], llm) -> list[CaseResult]:  # noqa: ANN001
         verification = verify_itinerary(repo, VerifyRequest(
             days=req.days, budget=req.budget,
             daily_minutes_cap=req.daily_minutes_cap,
-            must_visit=frozenset(req.must_visit), start_date=req.start_date,
+            must_visit=frozenset(req.must_visit),
+            start_date=dt.date.fromisoformat(req.start_date),
         ), claims)
         violations = list(verification.violations)
         if parse_errors:
@@ -145,6 +150,10 @@ def run(cases: list[PlanCase], llm) -> list[CaseResult]:  # noqa: ANN001
         }
         # 期望 infeasible 的用例：LLM 硬凑出行程即违背「不硬凑」——由下方补记失败
         r = grade_plan_case(case, pseudo_body, None)
+        r.latency_ms = llm_ms
+        r.token_in, r.token_out = resp.token_in, resp.token_out
+        r.metrics["p95_latency_ms"] = (True, llm_ms)
+        r.metrics["cost_per_plan"] = (True, float(resp.token_in + resp.token_out))
         if case.asserts.status == "infeasible" and not r.failures:
             r.fail("baseline A 硬凑了不可行请求的行程（未拒绝）")
             r.passed = False
