@@ -1,4 +1,5 @@
-"""数据表模型（§9 DDL）：runs / spans（阶段 0）+ memory_events / memory_views（阶段 2）。"""
+"""数据表模型（§9 DDL）：runs / spans（阶段 0）+ memory_events / memory_views（阶段 2）
++ eval_results（阶段 3）。"""
 
 from __future__ import annotations
 
@@ -14,6 +15,8 @@ class Run(Base):
     trace_id: Mapped[str] = mapped_column(String, primary_key=True)
     session_id: Mapped[str] = mapped_column(String, nullable=False)
     request_json: Mapped[str] = mapped_column(Text, nullable=False)
+    # 最终 PlanResponse（阶段 3：最近一次可行方案回退 + Trace 回放用）；失败/中断可为空
+    response_json: Mapped[str | None] = mapped_column(Text)
     # running | succeeded | failed | interrupted
     status: Mapped[str] = mapped_column(String, nullable=False)
     model: Mapped[str | None] = mapped_column(String)
@@ -77,3 +80,17 @@ class MemoryView(Base):
     valid_from: Mapped[str] = mapped_column(String, nullable=False)
     valid_to: Mapped[str | None] = mapped_column(String)
     last_confirmed_at: Mapped[str | None] = mapped_column(String)
+
+
+class EvalResult(Base):
+    """评测结果（§9）：一次评测运行的每用例×指标一行，按 git_sha 聚合出趋势（看板）。"""
+
+    __tablename__ = "eval_results"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    git_sha: Mapped[str] = mapped_column(String, nullable=False)
+    case_id: Mapped[str] = mapped_column(String, nullable=False)
+    metric: Mapped[str] = mapped_column(String, nullable=False)
+    passed: Mapped[int] = mapped_column(Integer, nullable=False)
+    value: Mapped[float | None] = mapped_column(Float)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)  # UTC ISO-8601

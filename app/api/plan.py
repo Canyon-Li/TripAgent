@@ -57,6 +57,7 @@ def plan(req: PlanRequest) -> PlanResponse:
     latency_ms = int((time.perf_counter() - t0) * 1000)
     response.applied_constraints = AppliedConstraintsOut(budget=req.budget)
     response.cost = CostOut(latency_ms=latency_ms)
+    runs_db.save_response(trace_id, response.model_dump(mode="json"))
     runs_db.finish_run(trace_id, "succeeded", latency_ms)
     return response
 

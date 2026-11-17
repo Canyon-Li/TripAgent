@@ -28,6 +28,42 @@ def create_run(trace_id: str, session_id: str, request_json: str, git_sha: str) 
         db.commit()
 
 
+def save_response(trace_id: str, response: dict) -> None:
+    """把最终 PlanResponse 落到 runs.response_json（最近一次可行方案回退 + Trace 回放）。"""
+    with SessionLocal() as db:
+        run = db.get(Run, trace_id)
+        if run is None:
+            return
+        run.response_json = json.dumps(response, ensure_ascii=False)
+        db.commit()
+
+
+def get_last_feasible_run(session_id: str, exclude_trace_id: str | None = None) -> dict | None:
+    """该 session 最近一次可行行程（§7.1「最近一次可行方案」降级数据源）。
+
+    可行 = run succeeded 且 response_json 内 status == "feasible"；
+    exclude_trace_id 用于排除当前正在处理的 run 自身。
+    """
+    with SessionLocal() as db:
+        stmt = (
+            select(Run)
+            .where(Run.session_id == session_id)
+            .where(Run.status == "succeeded")
+            .where(Run.response_json.is_not(None))
+            .order_by(Run.finished_at.desc().nulls_last(), Run.started_at.desc())
+        )
+        for run in db.scalars(stmt).all():
+            if exclude_trace_id and run.trace_id == exclude_trace_id:
+                continue
+            try:
+                resp = json.loads(run.response_json)
+            except (TypeError, ValueError):
+                continue
+            if resp.get("status") == "feasible":
+                return {"trace_id": run.trace_id, "response": resp}
+    return None
+
+
 def finish_run(
     trace_id: str,
     status: str,

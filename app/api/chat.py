@@ -34,7 +34,7 @@ from app.llm.adapter import LLMAdapter, UsageMeter, get_llm, llm_available
 from app.llm.tools import PREFERENCE_KEYWORDS
 from app.memory import ledger, policy, service, views
 from app.memory.service import ConstraintOrigin
-from app.runtime.pipeline import run_plan_pipeline
+from app.runtime.pipeline import Tick, run_plan_pipeline, span_bounds, tick
 from app.runtime.resolver import RecallLookup, resolve
 from app.runtime.responder import compose_reply, split_deltas
 from app.schemas import AppliedConstraintsOut, ChatRequest, ConstraintEcho, PlanRequest
@@ -53,12 +53,8 @@ def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _now_ms() -> int:
-    return int(time.time() * 1000)
-
-
-def _span(trace_id: str, name: str, t0: int, status: str = "ok", **meta: Any) -> None:
-    runs_db.add_span(trace_id, name, t0, _now_ms(), status, meta=meta or None)
+def _span(trace_id: str, name: str, t0: Tick, status: str = "ok", **meta: Any) -> None:
+    runs_db.add_span(trace_id, name, *span_bounds(t0), status, meta=meta or None)
 
 
 def _build_history(session_id: str) -> list[dict[str, str]]:
@@ -222,7 +218,7 @@ def _run_turn(
     )
 
     # ---- 2. Memory.read（固定链路，权威注入，B15）----
-    m0 = _now_ms()
+    m0 = tick()
     memory = service.read_memory(session_id=req.session_id, user_id=req.user_id)
     active = service.origins_to_fields(memory)
     _span(trace_id, "memory.read", m0, fields=len(memory),
@@ -230,7 +226,7 @@ def _run_turn(
     yield _sse("stage", {"name": "memory", "status": "done", "fields": len(memory)})
 
     # ---- 3. Resolver（白名单 function calling 回路 + B15 recall 检索 / 降级）----
-    r0 = _now_ms()
+    r0 = tick()
     outcome = resolve(
         llm,
         message=req.message,
@@ -262,7 +258,41 @@ def _run_turn(
             "llm": meter.as_dict(), "latency_ms": latency,
         })
 
+    def _replay_fallback(note: str) -> Iterator[str]:
+        """§7.1「规则模板 + 最近一次可行方案」降级：LLM 已失败且本轮无法产出新方案时，
+        回退本 session 最近一次可行行程（runs.response_json），明确标注降级与来源。"""
+        hit = runs_db.get_last_feasible_run(req.session_id, exclude_trace_id=trace_id)
+        if hit is None:
+            return None
+        fb_trace, fb_plan = hit["trace_id"], dict(hit["response"])
+        reply = (
+            f"（LLM 暂不可用，已降级）{note}。"
+            f"先沿用您最近一次可行方案（产生于 trace {fb_trace}），稍后可再调整。"
+        )
+        fb_plan["trace_id"] = trace_id  # 回放挂在当前 trace 下，便于瀑布图定位
+        yield _sse("stage", {"name": "fallback", "status": "done", "trace_id": fb_trace})
+        p0 = tick()
+        _span(trace_id, "responder.render", p0, degraded=True,
+              fallback="last_feasible", fallback_trace_id=fb_trace)
+        for chunk in split_deltas(reply):
+            yield _sse("delta", {"text": chunk})
+        runs_db.save_response(trace_id, fb_plan)
+        finish()
+        yield _sse("done", {
+            "type": "plan", "trace_id": trace_id, "turn": turn,
+            "reply": reply, "plan": fb_plan,
+            "fallback": {"type": "last_feasible", "trace_id": fb_trace},
+            "llm": meter.as_dict(),
+        })
+        return fb_trace
+
     if outcome.kind != "plan":
+        if outcome.degraded:
+            # 规则模板也没解析出约束：优先回退最近一次可行方案（§7.1），无历史再澄清
+            field, reason = outcome.clarification or ("message", "请说明行程约束")
+            replayed = yield from _replay_fallback(f"本轮未能解析出行约束（{reason}）")
+            if replayed:
+                return
         field, reason = outcome.clarification or ("message", "请说明行程约束")
         yield from _clarify(field, reason)
         return
@@ -279,7 +309,7 @@ def _run_turn(
         return
 
     # ---- 5. 写回 Ledger（合并终值；未变化字段由 Policy 跳过）+ refresh Views ----
-    w0 = _now_ms()
+    w0 = tick()
     report = policy.apply_assertions(
         session_id=req.session_id, user_id=req.user_id,
         fields={k: v for k, v in final.items() if k in policy.FIELD_SCOPES},
@@ -318,8 +348,15 @@ def _run_turn(
     yield _sse("stage", {"name": "verifier", "status": "done",
                          "plan_status": plan_resp.status})
 
+    if plan_resp.status == "infeasible" and outcome.degraded:
+        # §7.1 降级链尾：LLM 已失败 + 重规划不可行 → 回退最近一次可行方案，无历史才走不可行解释
+        reasons = "；".join(plan_resp.infeasible_reasons[:3])
+        replayed = yield from _replay_fallback(f"按当前约束重新规划不可行（{reasons}）")
+        if replayed:
+            return
+
     # ---- 7. Responder（LLM 解释 / 降级模板）+ SSE 增量 ----
-    p0 = _now_ms()
+    p0 = tick()
     plan_dict = plan_resp.model_dump(mode="json")
     echo = [c.to_public() for c in merged]
     reply = compose_reply(
@@ -334,10 +371,12 @@ def _run_turn(
     plan_resp.cost.token_out = meter.token_out
     latency = finish()
     plan_resp.cost.latency_ms = latency
+    plan_dump = plan_resp.model_dump(mode="json")
+    runs_db.save_response(trace_id, plan_dump)
     yield _sse("done", {
         "type": "plan", "trace_id": trace_id, "turn": turn,
         "reply": reply,
-        "plan": plan_resp.model_dump(mode="json"),
+        "plan": plan_dump,
         "memory": {
             "read": [c.to_public() for c in memory],
             "written": report.written,
