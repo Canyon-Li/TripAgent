@@ -58,6 +58,8 @@ class SolverParams:
     vehicle_fixed_cost: int = 0     # 启用一天（一辆车）的固定成本，§8 SetFixedCostOfVehicle
     time_limit_s: float = 2.0       # 求解时限（§14：n≤30，防交互卡顿）
     first_solution: str = _DEFAULT_FIRST_SOLUTION  # 首解策略（枚举成员名）
+    # 解数上限（None=不限；设 1 完全脱离时限截断波动，确定性复现用，ADR-007）
+    solution_limit: int | None = None
 
 
 @dataclass(frozen=True)
@@ -261,6 +263,8 @@ def _search_params(p: SolverParams) -> pywrapcp.DefaultRoutingSearchParameters:
         routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
     )
     search.time_limit.FromMilliseconds(int(p.time_limit_s * 1000))
+    if p.solution_limit is not None:
+        search.solution_limit = p.solution_limit
     return search
 
 

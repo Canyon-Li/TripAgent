@@ -39,7 +39,14 @@ SYSTEM_PROMPT_TEMPLATE = """你是 TripAgent 的意图解析器（Resolver）。
    recall_constraint(key=字段名)；
 3. 关键信息（如预算）既不在本条消息中、也不在上面的已确认约束里时，
    调用 ask_clarification(field=..., reason=...)；
-4. 不要输出自然语言，只能调用工具。"""
+4. 不要输出自然语言，只能调用工具。
+{catalog}"""
+
+
+def _catalog_section(poi_catalog: str) -> str:
+    if not poi_catalog:
+        return ""
+    return f"\n可选景点目录（must_visit 请使用下列 id）：\n{poi_catalog}"
 
 
 @dataclass
@@ -58,18 +65,22 @@ def build_resolver_messages(
     message: str,
     active_constraints: dict[str, Any],
     history: list[dict[str, str]],
+    poi_catalog: str = "",
 ) -> list[dict[str, str]]:
     """system（含约束重述，§7.2）+ 历史 + 本轮消息。"""
     constraints = json.dumps(active_constraints, ensure_ascii=False, default=str)
+    system = SYSTEM_PROMPT_TEMPLATE.format(
+        constraints=constraints, catalog=_catalog_section(poi_catalog)
+    )
     return [
-        {"role": "system", "content": SYSTEM_PROMPT_TEMPLATE.format(constraints=constraints)},
+        {"role": "system", "content": system},
         *history,
         {"role": "user", "content": message},
     ]
 
 
 def resolve(
-    llm: LLMAdapter,
+    llm: LLMAdapter | None,
     *,
     message: str,
     active_constraints: dict[str, Any],
@@ -77,14 +88,15 @@ def resolve(
     meter: UsageMeter,
     llm_enabled: bool = True,
     poi_index: tuple[tuple[str, str], ...] = (),
+    poi_catalog: str = "",
 ) -> ResolverOutcome:
-    """意图解析主入口。LLM 不可用/失败时降级规则模板（返回 degraded=True）。"""
-    if not llm_enabled:
+    """意图解析主入口。LLM 缺失/不可用/失败时降级规则模板（返回 degraded=True）。"""
+    if llm is None or not llm_enabled:
         meter.mark_degraded()
         return _degraded_outcome(message, poi_index)
     try:
         result = llm.chat(
-            messages=build_resolver_messages(message, active_constraints, history),
+            messages=build_resolver_messages(message, active_constraints, history, poi_catalog),
             tools=TOOLS_SCHEMA,
         )
         meter.add(result)

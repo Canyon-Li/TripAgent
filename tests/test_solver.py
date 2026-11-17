@@ -101,9 +101,12 @@ def test_must_visit_all_covered_when_generous() -> None:
 
 
 def test_solver_deterministic_objective_same_process() -> None:
+    # solution_limit=1 完全脱离时限截断波动（GLNS 在机器负载下 2s 截断点不同，
+    # 会得到不同局部最优）；确定性复现是评测可断言的前提（ADR-007）
+    params = SolverParams(solution_limit=1)
     repo = get_repository()
-    a = solve_plan(repo, _req())
-    b = solve_plan(repo, _req())
+    a = solve_plan(repo, _req(), params)
+    b = solve_plan(repo, _req(), params)
     assert a.objective == b.objective
     assert [d.depart_min for d in a.days] == [d.depart_min for d in b.days]
 

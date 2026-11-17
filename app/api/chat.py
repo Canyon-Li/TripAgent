@@ -1,0 +1,260 @@
+"""POST /api/chat（§10 SSE 流式）——阶段 2 多轮约束演进对话主链路（§7.1 / B12）。
+
+单轮流程（每轮全量重规划，B12）：
+    observation 落账 → Memory.read（权威注入，B15）
+    → Resolver（白名单 function calling，B14；LLM 缺失/失败 → 规则模板降级）
+    → merge（显式优先、记忆兜底）→ apply_assertions 写回 Ledger + refresh Views
+    → run_plan_pipeline（solve + verify，与 /api/plan 同一条确定性路径）
+    → Responder（LLM 解释 / 降级模板）
+SSE 事件：start / stage / clarification / delta / done / error。
+runs/spans 全记录：resolver.resolve、memory.read、memory.write、
+solver.solve、verifier.check、responder.render（trace_id 贯穿）。
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import json
+import time
+import uuid
+from collections.abc import Iterator
+from typing import Annotated, Any
+
+from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
+from pydantic import ValidationError
+
+from app.config import get_settings
+from app.db import runs as runs_db
+from app.db.repository import get_repository
+from app.llm.adapter import LLMAdapter, UsageMeter, get_llm, llm_available
+from app.memory import ledger, policy, service, views
+from app.runtime.pipeline import run_plan_pipeline
+from app.runtime.resolver import resolve
+from app.runtime.responder import compose_reply, split_deltas
+from app.schemas import AppliedConstraintsOut, ChatRequest, PlanRequest
+
+router = APIRouter(prefix="/api")
+
+HISTORY_WINDOW = 12  # 注入 Resolver 的最近轮数（observation 原话）
+
+
+def _get_llm_optional() -> LLMAdapter | None:
+    """无 key 时返回 None——主链路直接走规则模板降级（§7.1），不 500。"""
+    return get_llm() if llm_available() else None
+
+
+def _sse(event: str, data: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _span(trace_id: str, name: str, t0: int, status: str = "ok", **meta: Any) -> None:
+    runs_db.add_span(trace_id, name, t0, _now_ms(), status, meta=meta or None)
+
+
+def _build_history(session_id: str) -> list[dict[str, str]]:
+    """对话历史 = 该 session 最近 N 条用户原话（Ledger observation，§7.2）。"""
+    obs = ledger.list_events(session_id=session_id, event_type="observation")
+    return [
+        {"role": "user", "content": f"[第{o['content']['turn']}轮] {o['content']['text']}"}
+        for o in obs[-HISTORY_WINDOW:-1]  # 本轮原话在 resolver 里单独作为最后一条 user
+    ]
+
+
+def _normalize_fields(
+    fields: dict[str, Any], poi_index: tuple[tuple[str, str], ...]
+) -> tuple[dict[str, Any], list[str]]:
+    """数据级护栏：must_visit 名称→id 映射，未知条目剔除并记违规。"""
+    violations: list[str] = []
+    must = fields.get("must_visit")
+    if must:
+        id_by_name = dict(poi_index)
+        known = {pid for pid, _ in poi_index}
+        normalized, seen = [], set()
+        for item in must:
+            pid = item if item in known else id_by_name.get(item)
+            if pid is None:
+                violations.append(f"unknown_poi_dropped:{item}")
+                continue
+            if pid not in seen:
+                seen.add(pid)
+                normalized.append(pid)
+        if normalized:
+            fields["must_visit"] = normalized
+        else:
+            fields.pop("must_visit", None)
+    return fields, violations
+
+
+@router.post("/chat")
+def chat(
+    req: ChatRequest,
+    llm: Annotated[LLMAdapter | None, Depends(_get_llm_optional)],
+) -> StreamingResponse:
+    return StreamingResponse(
+        _chat_stream(req, llm),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+def _chat_stream(req: ChatRequest, llm: LLMAdapter | None) -> Iterator[str]:
+    t0 = time.perf_counter()
+    settings = get_settings()
+    repo = get_repository()
+    poi_index = tuple((p.id, p.name) for p in repo.pois)
+    poi_catalog = "\n".join(f"{pid} = {name}" for pid, name in poi_index)
+    meter = UsageMeter()
+
+    trace_id = f"tr-{uuid.uuid4().hex[:12]}"
+    runs_db.create_run(
+        trace_id=trace_id,
+        session_id=req.session_id,
+        request_json=req.model_dump_json(),
+        git_sha=settings.git_sha,
+    )
+    yield _sse("start", {"trace_id": trace_id, "session_id": req.session_id,
+                         "user_id": req.user_id})
+
+    def _finish(status: str = "succeeded") -> int:
+        latency = int((time.perf_counter() - t0) * 1000)
+        runs_db.finish_run(
+            trace_id, status, latency,
+            token_in=meter.token_in, token_out=meter.token_out,
+            model=meter.model or None,
+        )
+        return latency
+
+    # ---- 1. 本轮落账（observation）----
+    turn = policy.next_turn(req.session_id)
+    policy.record_observation(
+        session_id=req.session_id, user_id=req.user_id, text=req.message, turn=turn
+    )
+
+    # ---- 2. Memory.read（固定链路，权威注入，B15）----
+    m0 = _now_ms()
+    memory = service.read_memory(session_id=req.session_id, user_id=req.user_id)
+    active = service.origins_to_fields(memory)
+    _span(trace_id, "memory.read", m0, fields=len(memory),
+          sources={c.field: c.source for c in memory})
+    yield _sse("stage", {"name": "memory", "status": "done", "fields": len(memory)})
+
+    # ---- 3. Resolver（白名单 function calling / 降级）----
+    r0 = _now_ms()
+    outcome = resolve(
+        llm,
+        message=req.message,
+        active_constraints=active,
+        history=_build_history(req.session_id),
+        meter=meter,
+        poi_index=poi_index,
+        poi_catalog=poi_catalog,
+    )
+    fields, norm_violations = _normalize_fields(outcome.fields, poi_index)
+    outcome.guardrail_violations += norm_violations
+    _span(trace_id, "resolver.resolve", r0,
+          kind=outcome.kind, fields=fields, degraded=outcome.degraded,
+          recalled_keys=outcome.recalled_keys,
+          guardrail_violations=outcome.guardrail_violations, turn=turn)
+    yield _sse("stage", {
+        "name": "resolver", "status": "done", "kind": outcome.kind,
+        "degraded": outcome.degraded,
+        "guardrail_violations": outcome.guardrail_violations,
+    })
+
+    def _clarify(field: str, reason: str) -> Iterator[str]:
+        latency = _finish()
+        yield _sse("clarification", {"field": field, "reason": reason, "turn": turn})
+        yield _sse("done", {
+            "type": "clarification", "trace_id": trace_id, "turn": turn,
+            "field": field, "reason": reason, "reply": reason,
+            "llm": meter.as_dict(), "latency_ms": latency,
+        })
+
+    if outcome.kind != "plan":
+        field, reason = outcome.clarification or ("message", "请说明行程约束")
+        yield from _clarify(field, reason)
+        return
+
+    # ---- 4. merge（显式优先、记忆兜底）→ 硬字段检查 ----
+    merged = service.merge_constraints(fields, memory, turn=turn)
+    final = service.origins_to_fields(merged)
+    if not final.get("budget"):
+        yield from _clarify(
+            "budget", "还不知道预算——请告诉我这趟最多花多少钱（记忆里也没有历史预算可用）"
+        )
+        return
+
+    # ---- 5. 写回 Ledger（合并终值；未变化字段由 Policy 跳过）+ refresh Views ----
+    w0 = _now_ms()
+    report = policy.apply_assertions(
+        session_id=req.session_id, user_id=req.user_id,
+        fields={k: v for k, v in final.items() if k in policy.FIELD_SCOPES},
+        turn=turn,
+    )
+    for scope in {f"session:{req.session_id}", f"user:{req.user_id}"}:
+        views.refresh_view(scope)
+    _span(trace_id, "memory.write", w0, written=report.written,
+          superseded=report.superseded, skipped=report.skipped_unchanged)
+    yield _sse("stage", {"name": "memory.write", "status": "done",
+                         "written": len(report.written), "superseded": len(report.superseded)})
+
+    # ---- 6. 全量重规划（solve + verify，与 /api/plan 同路径）----
+    try:
+        plan_req = PlanRequest(
+            session_id=req.session_id,
+            start_date=dt.date.today(),
+            days=int(final.get("days", 3)),
+            budget=float(final["budget"]),
+            daily_minutes_cap=int(final.get("daily_minutes_cap", 480)),
+            must_visit=list(final.get("must_visit", [])),
+            preferences=list(final.get("preferences", [])),
+            hotel=str(final.get("hotel", "wangfujing")),
+        )
+    except ValidationError as exc:
+        yield from _clarify("constraints", f"约束取值不合法：{exc.errors()[0]['msg']}")
+        return
+    yield _sse("stage", {"name": "solver", "status": "start"})
+    plan_resp = run_plan_pipeline(repo=repo, req=plan_req, trace_id=trace_id)
+    plan_resp.applied_constraints = AppliedConstraintsOut(
+        budget=plan_req.budget,
+        source=next(c.source for c in merged if c.field == "budget"),
+        turn=next(c.turn for c in merged if c.field == "budget"),
+        constraints=[c.to_public() for c in merged],
+    )
+    yield _sse("stage", {"name": "verifier", "status": "done",
+                         "plan_status": plan_resp.status})
+
+    # ---- 7. Responder（LLM 解释 / 降级模板）+ SSE 增量 ----
+    p0 = _now_ms()
+    plan_dict = plan_resp.model_dump(mode="json")
+    echo = [c.to_public() for c in merged]
+    reply = compose_reply(
+        llm, user_message=req.message, plan_response_dict=plan_dict,
+        constraints_echo=echo, meter=meter,
+    )
+    _span(trace_id, "responder.render", p0, degraded=meter.degraded)
+    for chunk in split_deltas(reply):
+        yield _sse("delta", {"text": chunk})
+
+    plan_resp.cost.token_in = meter.token_in
+    plan_resp.cost.token_out = meter.token_out
+    latency = _finish()
+    plan_resp.cost.latency_ms = latency
+    yield _sse("done", {
+        "type": "plan", "trace_id": trace_id, "turn": turn,
+        "reply": reply,
+        "plan": plan_resp.model_dump(mode="json"),
+        "memory": {
+            "read": [c.to_public() for c in memory],
+            "written": report.written,
+            "superseded": report.superseded,
+            "recalled_keys": outcome.recalled_keys,
+            "guardrail_violations": outcome.guardrail_violations,
+        },
+        "llm": meter.as_dict(),
+    })

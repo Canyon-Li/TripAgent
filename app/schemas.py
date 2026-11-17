@@ -80,11 +80,13 @@ class VerificationOut(BaseModel):
 
 
 class AppliedConstraintsOut(BaseModel):
-    """约束来源回显（§10）。阶段 2 接入记忆层后 source 才会是 memory_views#N。"""
+    """约束来源回显（§10）。source 形如 "request" / "memory_views#17"；turn 为首次提出轮次。"""
 
     budget: float
     source: str = "request"
     turn: int = 1
+    # 逐字段 {field,value,source,turn}（阶段 2）
+    constraints: list[dict] = Field(default_factory=list)
 
 
 class CostOut(BaseModel):
@@ -110,3 +112,11 @@ class PlanResponse(BaseModel):
     infeasible_reasons: list[str] = Field(default_factory=list)
     cost: CostOut = CostOut()
     solver: SolverOut = SolverOut()
+
+
+class ChatRequest(BaseModel):
+    """POST /api/chat 请求（§10 SSE 流式对话；B9 无登录，session/user 直接声明）。"""
+
+    session_id: str = Field(default="s-default", min_length=1, max_length=64)
+    user_id: str = Field(default="u-demo", min_length=1, max_length=64)
+    message: str = Field(min_length=1, max_length=2000)

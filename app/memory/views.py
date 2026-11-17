@@ -124,7 +124,8 @@ def _active_views_snapshot() -> dict[tuple[str, str], dict[str, Any]]:
 def rebuild_views() -> dict[str, Any]:
     """重放全量 Ledger 重建 Views（§7.2 定期重放）：关闭全部活跃 view → 逐 scope 重派生。
 
-    返回重建前后快照与一致性与否；consistent=True 是 §13「可回放 Ledger」的验收口径。
+    consistent = 已有 view 的 scope 重建后值不变（§13「可回放 Ledger」验收口径）；
+    「有 assertion 但从未建过 view」的 scope 会被补建（healed，自愈而非不一致）。
     """
     before = _active_views_snapshot()
     now = _now_iso()
@@ -139,8 +140,11 @@ def rebuild_views() -> dict[str, Any]:
     for s in scopes:
         refresh_view(s)
     after = _active_views_snapshot()
+    healed = sorted(f"{k[0]}:{k[1]}" for k in after.keys() - before.keys())
+    consistent = all(after.get(k) == v for k, v in before.items())
     return {
-        "consistent": before == after,
+        "consistent": consistent,
+        "healed": healed,
         "scopes": scopes,
         "before": {f"{k[0]}:{k[1]}": v for k, v in before.items()},
         "after": {f"{k[0]}:{k[1]}": v for k, v in after.items()},
