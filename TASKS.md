@@ -12,9 +12,9 @@
 - [x] **0.4 POI 数据集** `data/pois.json`：高德导出北京 18–30 个 POI（名称/坐标/地址），**人工校对**营业时间、门票、建议时长、评分；每条带 `export_date` 与 `source` ✅ 2026-11-17 `scripts/export_pois.py` 导出 23 个 POI（0 缺失、字段校验通过）；营业时间/门票/时长/评分经作者人工校对（`manual_review` 记录在案，`needs_review` 已清空）
 - [x] **0.5 距离矩阵** `data/matrix.json`：一次性预计算 n×n 耗时（高德驾车优先，OSRM 兜底，B7），含生成脚本 `scripts/build_matrix.py`（可复跑、记录参数）✅ 2026-11-17 24×24（酒店锚点 + 23 POI），高德 v3/distance 全列命中、0 次 OSRM 兜底；产出 minutes/km/fare_cny（出租车启发式，公式在 meta）；抽查 2 组 OD 与 v3/direction/driving 交叉验证一致（18.0↔19 / 36.9↔37，仅 ceil 差）；v5 接口对该 key 不可用（10017），已按 v3 落盘
 - [x] **0.6 服务骨架**：FastAPI 入口 + `/healthz` `/readyz`（返回 version + git_sha）+ Alembic 初始迁移建 `runs` / `spans` 表 ✅ 2026-11-17 uvicorn 实测 `/healthz` 200（version 0.1.0 + git_sha 0515a86）、`/readyz` 200（database ok）；Alembic 迁移 `12cd442bb18f` 建 runs(11 列)/spans(8 列)，与 §9 DDL 一致；SQLite WAL 持久化验证；pytest 2 passed + ruff clean
-- [ ] **0.7 容器化**：`docker-compose.yml`（api / web）+ `.env.example`（对齐 §11.2）+ Windows 本地与 VPS 各验证一次（B4 / B13）
-- [ ] **0.8 CI 占位**：GitHub Actions——pytest（空测试集）+ lint，PR 必过（B8）
-- [ ] **0.9 README**：快速上手、`architecture.svg` 引用、数据来源与导出日期声明（§14 授权风险缓解）
+- [ ] **0.7 容器化**：`docker-compose.yml`（api / web）+ `.env.example`（对齐 §11.2）+ Windows 本地与 VPS 各验证一次（B4 / B13）　🟡 2026-11-17 Windows 本地验证通过：`compose up` 后 `/healthz` 200（git_sha 407807e 构建注入）、`/readyz` database ok（启动即迁移）、web 3000 200；PIP_INDEX_URL 默认阿里云镜像（tuna 对容器 403，pypi.org 直连慢）。**VPS 验证待部署时执行**
+- [x] **0.8 CI 占位**：GitHub Actions——pytest（空测试集）+ lint，PR 必过（B8）✅ 2026-11-17 run 44061287410 全绿（`test`/`lint` job 名与分支保护必需检查一致）；test job 含 alembic 迁移步骤，探针契约测试在 CI 环境通过
+- [x] **0.9 README**：快速上手、`architecture.svg` 引用、数据来源与导出日期声明（§14 授权风险缓解）✅ 2026-11-17 快速上手（compose/本地开发/数据导出）、数据来源表（POI 高德+人工校对日期、矩阵预计算+交叉验证、fare 启发式声明）、结构说明、CI 说明
 
 **验收**：`docker compose up` 后 `curl /healthz` 返回 200 且含 git_sha；`pytest -q` 绿；公开仓库可访问；`pois.json` ≥ 18 个 POI 且无缺字段。
 

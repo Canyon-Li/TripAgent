@@ -577,7 +577,7 @@ python -m app.eval.runner --baseline
 | 阶段 | 产出 | 验收标准 | 状态 |
 | --- | --- | --- | --- |
 | **前置 边界确认** | §0 边界确认记录（B1–B13）、ADR-006/007、`TASKS.md` | 13 项实施边界逐条落定并回写文档 | ✅ 完成（2026-11-17） |
-| **0 资源就绪** | API key、POI 数据集、Docker Compose、公开 demo、README 架构图 | `docker compose up` 可访问；`/healthz` 返回版本 | 待开始 |
+| **0 资源就绪** | API key、POI 数据集、Docker Compose、公开 demo、README 架构图 | `docker compose up` 可访问；`/healthz` 返回版本 | 🟡 2026-11-17 基本完成：Windows 本地 compose 验收通过（/healthz 200 含 git_sha、pytest 绿、CI test+lint 绿、pois.json 23 个无缺字段）；VPS 部署验证待做（0.7 尾项） |
 | **1 最小可跑** | 单城 3 日行程、Routing 求解、独立校验器、行程前端 | 40 条用例中时间窗冲突为 0 | 待开始 |
 | **2 记忆层** | Ledger / Views / Policy、多轮一致性演示 | 第 6 轮约束回显正确，可回放 Ledger | 待开始 |
 | **3 评测观测** | 评测集、Trace Store、看板、CI 回归报告 | 产出改动前后指标对比图 | 待开始 |
