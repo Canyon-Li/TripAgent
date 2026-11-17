@@ -75,6 +75,8 @@
 
 **验收**：`python -m app.eval.runner --include-hidden --baseline all` 产出三列报告且 final_pass_rate=current 列全过口径成立；CI eval job 对故意退化 exit 1；`GET /api/eval/reports` 返回多 git_sha 趋势；浏览器出示一条完整 trace 瀑布图（§16 证据）；§12 TBD 全部回填真实数字。　✅ 2026-11-17 全过：三列报告 current 0.975 / A 0.000 / B 0.800（40 条含 hidden，deepseek-flash）；回归阻断实测 exit 1（REGRESSION 消息 + 退出码）；/api/eval/reports 多 sha 趋势（eval_results 入库）；瀑布图六段浏览器出示（含真实 LLM trace）；project.md §12 八指标 + §1 结论数字全部真实回填（数据诚实约定）。**阶段 3 冻结。**
 
+> **Code review 修复（2026-11-18，62217b6..bcb01d3 两轴审查后）**：①graders 口径对齐 §12——budget_accuracy 补「回显一致且不超支」双查、hard_constraint 纯化（days_count/turn_types 等行为类断言只进 final）、去「预算超支」子串反推协议；②§7.3 漏项「坏例一键转评测用例」补齐（app/eval/badcase.py + scripts/badcase_to_eval.py，chat run 从回显终值还原请求，_meta 计数同步 + 重载校验）；③报告评测集 sha256 摘要接通（runner 传 cases_path）；④B 列写侧隔离（session/user 加 :B 后缀，不再向共享 scope 写评测记忆）；⑤A 列 fake 模式改「未运行」呈现而非伪 FAIL；⑥check_plans 断言收敛 grade_plan_case 单一来源；⑦指标标签/聚合形态后端 metrics_meta 下发（前端删硬编码与 mode 级联）；⑧小清理：chat 公开 get_llm_optional 接缝、SSE 解析去重（conftest）、删 dump_results/aggregate_column 中间层、evals 注释失真、前端死分支；⑨文档回写：project.md §9 补 runs.response_json、§10 补 chat 可选 start_date、README 补分支保护复核命令。修后 pytest 133 绿 + ruff clean + fake 40/40 + check_plans 32/32 + --ci exit 0。
+
 ---
 
 ## 后续阶段（占位，阶段 3 冻结后细化）

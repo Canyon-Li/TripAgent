@@ -400,11 +400,12 @@ CREATE TABLE runs (
   trace_id     TEXT PRIMARY KEY,
   session_id   TEXT NOT NULL,
   request_json TEXT NOT NULL,
+  response_json TEXT,                  -- 阶段 3：最终 PlanResponse（§7.1 最近一次可行方案回退 + 坏例转用例）
   status       TEXT NOT NULL,          -- running | succeeded | failed | interrupted
   model        TEXT,
   git_sha      TEXT,
   started_at   TEXT NOT NULL,
-  finished_at  TEXT,
+  finished_at   TEXT,
   latency_ms   INTEGER,
   token_in     INTEGER,
   token_out    INTEGER
@@ -440,7 +441,7 @@ CREATE TABLE eval_results (
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `POST` | `/api/chat` | SSE 流式对话，返回增量文本与最终 `trace_id` |
+| `POST` | `/api/chat` | SSE 流式对话，返回增量文本与最终 `trace_id`。请求体可带可选 `start_date`（评测用例固定日期保证周一闭馆类断言确定性，§15；生产前端不传，默认当天） |
 | `POST` | `/api/plan` | 结构化输入直接求解，跳过意图解析（便于评测） |
 | `GET` | `/api/runs/{trace_id}` | 返回 run + spans，供 Trace 视图回放 |
 | `POST` | `/api/eval/run` | 触发全量评测，返回报告路径 |

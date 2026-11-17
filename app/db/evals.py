@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import json
 
 from sqlalchemy import select
 
@@ -67,7 +66,7 @@ def list_report_runs(limit: int = 50) -> list[dict]:
         ).all()
     runs: dict[tuple[str, str], dict] = {}
     for git_sha, metric, passed, value, created_at in rows:
-        key = (git_sha, created_at[:19])  # 同毫秒批量写入视为同一运行
+        key = (git_sha, created_at[:19])  # 同一秒内批量写入的行归为同一次评测运行
         r = runs.setdefault(key, {
             "git_sha": git_sha, "created_at": created_at,
             "metrics": {}, "cases": set(),
@@ -96,16 +95,3 @@ def metric_names() -> list[str]:
         return [n for n in db.scalars(
             select(EvalResult.metric).distinct().order_by(EvalResult.metric)
         ).all()]
-
-
-def dump_results(git_sha: str | None = None) -> str:
-    """原始结果导出（调试用）。"""
-    with SessionLocal() as db:
-        q = select(EvalResult).order_by(EvalResult.id)
-        if git_sha:
-            q = q.where(EvalResult.git_sha == git_sha)
-        rows = db.scalars(q).all()
-    return json.dumps(
-        [{"git_sha": r.git_sha, "case_id": r.case_id, "metric": r.metric,
-          "passed": bool(r.passed), "value": r.value, "created_at": r.created_at}
-         for r in rows], ensure_ascii=False, indent=2)

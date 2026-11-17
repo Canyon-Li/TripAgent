@@ -634,14 +634,8 @@ document.getElementById("trace_input").addEventListener("keydown", e => {
 renderRecentTraces();
 
 /* ---------------- 评测看板（阶段 3）：趋势 + 运行列表 ---------------- */
-const METRIC_NAMES = {
-  "hard_constraint_pass_rate": "硬约束通过率", "time_window_violations": "时间窗冲突总数",
-  "budget_accuracy": "预算准确率", "memory_recall@6": "记忆召回（chat）",
-  "tool_success_rate.function_calling": "工具成功率·FC",
-  "tool_success_rate.capability": "工具成功率·能力",
-  "p95_latency_ms": "P95 延迟 ms", "cost_per_plan": "单均 token",
-  "final_pass_rate": "final_pass_rate",
-};
+/* 指标标签与聚合形态（rate/sum/mean）由 GET /api/eval/reports 的 metrics_meta 下发，
+   前端不再硬编码指标语义 */
 let DASH_DATA = null;
 
 async function loadDash(force) {
@@ -666,10 +660,11 @@ function pct(v) {
 function renderDash() {
   const sel = document.getElementById("dash_metric");
   if (!sel.options.length) {
-    (DASH_DATA.metrics || []).forEach(m => {
+    (DASH_DATA.metrics_meta || DASH_DATA.metrics || []).forEach(m => {
+      const name = typeof m === "string" ? m : m.name;
       const o = document.createElement("option");
-      o.value = m;
-      o.textContent = METRIC_NAMES[m] || m;
+      o.value = name;
+      o.textContent = typeof m === "string" ? name : `${m.label}（${name}）`;
       sel.appendChild(o);
     });
     if ((DASH_DATA.metrics || []).includes("final_pass_rate")) sel.value = "final_pass_rate";
@@ -703,16 +698,16 @@ function renderDashChart() {
   const box = document.getElementById("dash_chart");
   const trend = (DASH_DATA.trends || {})[m] || [];
   if (!trend.length) { box.innerHTML = '<p class="empty">该指标暂无数据。</p>'; return; }
-  // 聚合形态：率类 passed/total；冲突数取和；延迟/成本取均值（真 P95 见报告 md）
-  const mode = m === "time_window_violations" ? "sum"
-    : (m === "p95_latency_ms" || m === "cost_per_plan") ? "mean" : "rate";
+  // 聚合形态来自后端 metrics_meta（rate=通过率 / sum=求和 / mean=均值，真 P95 见报告 md）
+  const meta = (DASH_DATA.metrics_meta || []).find(x => x.name === m);
+  const mode = (meta && meta.agg) || "rate";
   const pts = trend.map(t => ({
     sha: String(t.git_sha).slice(0, 7),
     y: mode === "rate" ? (t.total ? t.passed / t.total : 0)
       : mode === "sum" ? t.value : (t.total ? t.value / t.total : 0),
   }));
   const ys = pts.map(p => p.y);
-  const ymin = mode === "rate" ? 0 : 0;
+  const ymin = 0;
   const ymax = mode === "rate" ? 1 : (Math.max(...ys) * 1.15 || 1);
   const W = 640, H = 210, L = 46, R = 12, T = 14, B = 34;
   const x = i => L + (pts.length === 1 ? (W - L - R) / 2 : i * (W - L - R) / (pts.length - 1));

@@ -55,7 +55,11 @@ def _num_eq(a: float, b: float) -> bool:
 
 
 def grade_plan_case(case: PlanCase, body: dict | None, http_error: str | None = None) -> CaseResult:
-    """plan 单轮用例评分（断言口径与 scripts/check_plans.py 一致）。"""
+    """plan 单轮用例评分（唯一断言口径来源，check_plans 也走这里）。
+
+    断言分两类（§12）：硬约束类（status/必去覆盖/预算一致且不超支/时间窗/不可行证据）
+    进 hard_constraint_pass_rate 与 budget_accuracy；行为类（days_count）只进 final。
+    """
     r = CaseResult(case.case_id, case.hidden, "plan")
     a = case.asserts
     if http_error or body is None:
@@ -68,33 +72,50 @@ def grade_plan_case(case: PlanCase, body: dict | None, http_error: str | None = 
     r.latency_ms = body.get("cost", {}).get("latency_ms") or 0
     r.trace_ids = [body.get("trace_id", "")]
     tw_violations = len(body.get("verification", {}).get("violations") or [])
+    hard_ok = True
+    over_budget = False
+    echo_consistent = True
 
     if body.get("status") != a.status:
+        hard_ok = False
         r.fail(f"status={body.get('status')}，期望 {a.status}")
     if body.get("status") == "feasible":
         stops = {s["poi"] for d in body.get("days", []) for s in d.get("stops", [])}
         if a.must_visit_covered:
             missing = set(case.request.must_visit) - stops
             if missing:
+                hard_ok = False
                 r.fail(f"必去点未覆盖: {sorted(missing)}")
         spent = body.get("verification", {}).get("recomputed_budget", math.inf)
         if a.budget_within and spent > case.request.budget + 1e-6:
+            hard_ok = False
+            over_budget = True
             r.fail(f"预算超支: 重算 {spent} > {case.request.budget}")
+        # §12 budget_accuracy「一致」：回显的生效预算不得篡改请求预算
+        echo_budget = body.get("applied_constraints", {}).get("budget")
+        if echo_budget is not None and not _num_eq(echo_budget, case.request.budget):
+            hard_ok = False
+            echo_consistent = False
+            r.fail(f"预算回显不一致: {echo_budget} != 请求 {case.request.budget}")
         if a.days_count is not None and len(body.get("days", [])) != a.days_count:
-            r.fail(f"天数 {len(body.get('days', []))} != {a.days_count}")
+            r.fail(f"天数 {len(body.get('days', []))} != {a.days_count}")  # 行为类，不进硬约束
         if tw_violations != a.time_window_violations:
+            hard_ok = False
             r.fail(f"校验器检出 {tw_violations} 处冲突（期望 {a.time_window_violations}）")
     else:
         if body.get("days"):
+            hard_ok = False
             r.fail("infeasible 却返回了行程")
         if not body.get("infeasible_reasons"):
+            hard_ok = False
             r.fail("infeasible 缺少原因")
         for needle in a.reason_contains:
             if not any(needle in reason for reason in body.get("infeasible_reasons", [])):
+                hard_ok = False
                 r.fail(f"原因缺少子串 {needle!r}")
 
-    budget_ok = not any("预算超支" in f for f in r.failures)
-    r.set(M_HARD, r.passed, 1.0 if r.passed else 0.0)
+    budget_ok = not over_budget and echo_consistent
+    r.set(M_HARD, hard_ok, 1.0 if hard_ok else 0.0)
     r.set(M_TIMEWIN, tw_violations == a.time_window_violations, float(tw_violations))
     r.set(M_BUDGET, budget_ok, 1.0 if budget_ok else 0.0)
     r.set(M_P95, True, r.latency_ms)  # 记录型（§12 不阻断）
@@ -129,15 +150,18 @@ def grade_chat_case(
         r.token_in += llm.get("token_in") or 0
         r.token_out += llm.get("token_out") or 0
 
-    # 轮次类型
+    # 轮次类型（行为类断言：不进硬约束，只进 final）
     types = [d.get("type", "?") for d in turn_dones]
     if a.turn_types is not None and types != list(a.turn_types):
         r.fail(f"轮次类型 {types} != 期望 {list(a.turn_types)}")
 
+    hard_ok = True  # 硬约束类（§12）：末轮可执行性 + 必去/预算/时间窗/不可行证据
+    over_budget = False
     final_plan = last.get("plan") or {}
     final_status = last.get("type") if last.get("type") == "clarification" \
         else final_plan.get("status", "?")
     if final_status != a.final_status:
+        hard_ok = False
         r.fail(f"末轮终态 {final_status} != 期望 {a.final_status}")
 
     # memory_recall（§12 memory_recall@6 的逐用例形态）：末轮 plan 的约束回显
@@ -166,9 +190,9 @@ def grade_chat_case(
             r.fail(f"memory_recall[{want.field}]: 轮次 {got.get('turn')} != {want.turn}")
     r.set(M_RECALL, recall_ok, 1.0 if recall_ok else 0.0)
 
-    # 可行末轮的硬约束（与 plan 用例同口径）
+    # 可行末轮的硬约束（与 plan 用例同口径；budget 一致性子集：chat 的生效预算来自
+    # 记忆/显式合并，其与期望值的一致性已由 memory_recall 断言覆盖，此处只查不超支）
     tw_violations = len(final_plan.get("verification", {}).get("violations") or [])
-    hard_ok = True
     if a.final_status == "feasible" and final_plan.get("status") == "feasible":
         stops = {s["poi"] for d in final_plan.get("days", []) for s in d.get("stops", [])}
         want_must = next(
@@ -182,6 +206,7 @@ def grade_chat_case(
         budget = final_plan.get("applied_constraints", {}).get("budget", math.inf)
         if a.budget_within and spent > float(budget) + 1e-6:
             hard_ok = False
+            over_budget = True
             r.fail(f"预算超支: 重算 {spent} > {budget}")
         if tw_violations != a.time_window_violations:
             hard_ok = False
@@ -214,8 +239,7 @@ def grade_chat_case(
 
     r.set(M_HARD, hard_ok, 1.0 if hard_ok else 0.0)
     r.set(M_TIMEWIN, tw_violations == a.time_window_violations, float(tw_violations))
-    r.set(M_BUDGET, not any("预算超支" in f for f in r.failures),
-          0.0 if any("预算超支" in f for f in r.failures) else 1.0)
+    r.set(M_BUDGET, not over_budget, 0.0 if over_budget else 1.0)
     r.set(M_P95, True, r.latency_ms)  # 记录型：chat 为各轮耗时和（真 P95 见报告聚合）
     r.set(M_COST, True, float(r.token_in + r.token_out))
     r.set(M_FINAL, r.passed, 1.0 if r.passed else 0.0)

@@ -6,22 +6,11 @@ import json
 from collections.abc import Callable
 
 import pytest
+from conftest import parse_sse as _parse_sse
 from fastapi.testclient import TestClient
 
-from app.api.chat import _get_llm_optional
+from app.api.chat import get_llm_optional
 from tests.fakes import FakeLLM, tool_call_result
-
-
-def _parse_sse(text: str) -> list[tuple[str, dict]]:
-    events = []
-    for block in text.strip().split("\n\n"):
-        lines = block.split("\n")
-        if not lines or not lines[0].startswith("event: "):
-            continue
-        event = lines[0][len("event: "):]
-        data = json.loads(lines[1][len("data: "):])
-        events.append((event, data))
-    return events
 
 
 @pytest.fixture()
@@ -33,10 +22,10 @@ def install_llm(client: TestClient) -> Callable[[FakeLLM], None]:
     from app.main import app
 
     def _install(fake: FakeLLM) -> None:
-        app.dependency_overrides[_get_llm_optional] = lambda: fake
+        app.dependency_overrides[get_llm_optional] = lambda: fake
 
     yield _install
-    app.dependency_overrides.pop(_get_llm_optional, None)
+    app.dependency_overrides.pop(get_llm_optional, None)
 
 
 def _post(client: TestClient, message: str, *, session: str, user: str):

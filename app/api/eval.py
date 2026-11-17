@@ -48,7 +48,11 @@ def run_eval(req: EvalRunRequest) -> dict:
 
 @router.get("/reports")
 def list_reports(metric: str | None = None, limit: int = 20) -> dict:
-    """历史评测趋势：每指标的 (git_sha, 时间, 聚合) 序列 + 运行列表（看板数据源）。"""
+    """历史评测趋势：每指标的 (git_sha, 时间, 聚合) 序列 + 运行列表（看板数据源）。
+
+    metrics_meta 下发指标的中文标签与聚合形态（rate/sum/mean）——前端下拉与
+    图表不再各自硬编码指标语义。
+    """
     names = evals_db.metric_names()
     if metric is None:
         wanted = names
@@ -56,6 +60,7 @@ def list_reports(metric: str | None = None, limit: int = 20) -> dict:
         wanted = [metric] if metric in names else []
     return {
         "metrics": names,
+        "metrics_meta": [m for m in report_mod.metrics_meta() if m["name"] in names],
         "trends": {m: evals_db.list_metric_trend(m) for m in wanted},
         "runs": evals_db.list_report_runs(limit=limit),
         "baseline": _baseline_summary(),

@@ -7,7 +7,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.chat import _get_llm_optional
+from app.api.chat import get_llm_optional
 from tests.fakes import FakeLLM, tool_call_result
 
 
@@ -16,21 +16,21 @@ def install_llm(client: TestClient):
     from app.main import app
 
     def _install(fake: FakeLLM) -> None:
-        app.dependency_overrides[_get_llm_optional] = lambda: fake
+        app.dependency_overrides[get_llm_optional] = lambda: fake
 
     yield _install
-    app.dependency_overrides.pop(_get_llm_optional, None)
+    app.dependency_overrides.pop(get_llm_optional, None)
 
 
 def _chat(client: TestClient, message: str, *, session: str, user: str, fake: FakeLLM) -> dict:
     """单轮 chat，返回 done 事件 payload（fake 每轮重装以注入脚本）。"""
     from app.main import app
 
-    app.dependency_overrides[_get_llm_optional] = lambda: fake
+    app.dependency_overrides[get_llm_optional] = lambda: fake
     r = client.post("/api/chat", json={
         "session_id": session, "user_id": user, "message": message,
     })
-    app.dependency_overrides.pop(_get_llm_optional, None)
+    app.dependency_overrides.pop(get_llm_optional, None)
     assert r.status_code == 200
     done_line = [ln for ln in r.text.split("\n") if ln.startswith("data: ")][-1]
     return json.loads(done_line[len("data: "):])

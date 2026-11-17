@@ -36,10 +36,21 @@ METRIC_LABELS = {
     graders.M_FINAL: "final_pass_rate",
 }
 
+# 指标聚合形态（看板/报告共用，避免前端按指标名重推导）：rate=通过数/适用数，
+# sum=逐用例值求和（冲突总数），mean=逐用例值均值（延迟/成本记录型）
+METRIC_AGGS = {
+    graders.M_HARD: "rate", graders.M_TIMEWIN: "sum", graders.M_BUDGET: "rate",
+    graders.M_RECALL: "rate", graders.M_TOOL_FC: "rate", graders.M_TOOL_CAP: "rate",
+    graders.M_P95: "mean", graders.M_COST: "mean", graders.M_FINAL: "rate",
+}
 
-def aggregate_column(results: list[CaseResult]) -> dict[str, float]:
-    """列聚合（转发 graders.aggregate；单独导出便于测试）。"""
-    return graders.aggregate(results)
+
+def metrics_meta() -> list[dict]:
+    """指标元数据（GET /api/eval/reports 下发，前端下拉与图表不再各自硬编码）。"""
+    return [
+        {"name": m, "label": METRIC_LABELS[m], "agg": METRIC_AGGS[m]}
+        for m in METRIC_ORDER
+    ]
 
 
 def case_to_dict(c: CaseResult) -> dict:
@@ -114,6 +125,11 @@ def write_report(
         if results is None:
             continue
         lines.append(f"### {col}")
+        if not results:
+            lines.append("")
+            lines.append("*未运行（基线 A 需要真实 LLM；fake/CI 模式跳过）*")
+            lines.append("")
+            continue
         lines.append("")
         lines.append("| case | hidden | 结果 | 失败原因 |")
         lines.append("| --- | --- | --- | --- |")
@@ -125,7 +141,8 @@ def write_report(
 
     n_pass = {col: sum(1 for c in rs if c.passed) for col, rs in columns.items()}
     lines.append("**final 通过数**：" + "，".join(
-        f"{col} {n_pass.get(col, 0)}/{len(rs)}" for col, rs in columns.items()))
+        f"{col} {'未运行' if not rs else f'{n_pass.get(col, 0)}/{len(rs)}'}"
+        for col, rs in columns.items()))
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
 
@@ -134,6 +151,9 @@ def summary_line(columns: dict[str, list[CaseResult]],
                  aggregates: dict[str, dict[str, float]]) -> str:
     parts = []
     for col, rs in columns.items():
+        if not rs:
+            parts.append(f"{col}: 未运行（需要真实 LLM）")
+            continue
         n = sum(1 for c in rs if c.passed)
         rate = aggregates.get(col, {}).get(graders.M_FINAL, float("nan"))
         parts.append(f"{col}: {n}/{len(rs)}（final_pass_rate {_fmt(rate)}）")

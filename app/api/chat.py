@@ -44,8 +44,11 @@ router = APIRouter(prefix="/api")
 HISTORY_WINDOW = 12  # 注入 Resolver 的最近轮数（observation 原话）
 
 
-def _get_llm_optional() -> LLMAdapter | None:
-    """无 key 时返回 None——主链路直接走规则模板降级（§7.1），不 500。"""
+def get_llm_optional() -> LLMAdapter | None:
+    """LLM 依赖注入口（公开接缝）：无 key 返回 None——主链路直接走规则模板降级（§7.1）。
+
+    eval runner / 测试通过 dependency_overrides[get_llm_optional] 注入替身。
+    """
     return get_llm() if llm_available() else None
 
 
@@ -152,7 +155,7 @@ def _normalize_fields(
 @router.post("/chat")
 def chat(
     req: ChatRequest,
-    llm: Annotated[LLMAdapter | None, Depends(_get_llm_optional)],
+    llm: Annotated[LLMAdapter | None, Depends(get_llm_optional)],
 ) -> StreamingResponse:
     return StreamingResponse(
         _chat_stream(req, llm),
@@ -291,13 +294,12 @@ def _run_turn(
         return fb_trace
 
     if outcome.kind != "plan":
+        field, reason = outcome.clarification or ("message", "请说明行程约束")
         if outcome.degraded:
             # 规则模板也没解析出约束：优先回退最近一次可行方案（§7.1），无历史再澄清
-            field, reason = outcome.clarification or ("message", "请说明行程约束")
             replayed = yield from _replay_fallback(f"本轮未能解析出行约束（{reason}）")
             if replayed:
                 return
-        field, reason = outcome.clarification or ("message", "请说明行程约束")
         yield from _clarify(field, reason)
         return
 

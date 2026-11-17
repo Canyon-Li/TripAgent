@@ -13,7 +13,7 @@ import json
 
 from fastapi.testclient import TestClient
 
-from app.api.chat import _get_llm_optional
+from app.api.chat import get_llm_optional
 from app.memory import ledger
 from tests.fakes import FakeLLM, tool_call_result
 
@@ -25,13 +25,13 @@ def _turn(client: TestClient, session: str, user: str, message: str, fields: dic
     fake = FakeLLM([
         tool_call_result(("submit_plan_request", json.dumps(fields))),
     ])
-    app.dependency_overrides[_get_llm_optional] = lambda: fake
+    app.dependency_overrides[get_llm_optional] = lambda: fake
     try:
         r = client.post("/api/chat", json={
             "session_id": session, "user_id": user, "message": message,
         })
     finally:
-        app.dependency_overrides.pop(_get_llm_optional, None)
+        app.dependency_overrides.pop(get_llm_optional, None)
     assert r.status_code == 200
     done_line = [ln for ln in r.text.split("\n") if ln.startswith("data: ")][-1]
     done = json.loads(done_line[len("data: "):])

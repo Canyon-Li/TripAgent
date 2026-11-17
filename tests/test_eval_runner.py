@@ -77,9 +77,40 @@ def test_grade_plan_feasible_and_infeasible():
     r2 = graders.grade_plan_case(_plan_case(), body, None)
     assert not r2.passed
     assert r2.metrics[M_TIMEWIN] == (False, 1.0)
+    assert r2.metrics[M_HARD] == (False, 0.0)  # 时间窗冲突属硬约束类
 
     r3 = graders.grade_plan_case(_plan_case(), None, "HTTP 500")
     assert not r3.passed and "HTTP 500" in r3.failures
+
+
+def test_grade_plan_days_count_is_behavioral_not_hard():
+    """code-review 修（Spec c2）：days_count 失败只进 final，不污染 hard_constraint。"""
+    case = PlanCase.model_validate({
+        "case_id": "g2", "request": {"days": 2, "budget": 1000,
+                                     "start_date": "2026-11-18"},
+        "asserts": {"status": "feasible", "days_count": 2},
+    })
+    body = _feasible_body()  # days 只有 1 天
+    r = graders.grade_plan_case(case, body, None)
+    assert not r.passed  # final 失败
+    assert any("天数" in f for f in r.failures)
+    assert r.metrics[M_HARD] == (True, 1.0)  # 但硬约束全过
+    assert r.metrics[M_FINAL] == (False, 0.0)
+
+
+def test_grade_plan_budget_echo_consistency():
+    """code-review 修（Spec c1）：§12 budget_accuracy=「回显一致且不超支」。"""
+    body = _feasible_body()
+    body["applied_constraints"] = {"budget": 999}  # 回显篡改请求预算（请求 1000）
+    r = graders.grade_plan_case(_plan_case(), body, None)
+    assert r.metrics[M_BUDGET] == (False, 0.0)
+    assert any("回显不一致" in f for f in r.failures)
+    assert r.metrics[M_HARD] == (False, 0.0)
+
+    body2 = _feasible_body()
+    body2["verification"]["recomputed_budget"] = 2000  # 超支
+    r2 = graders.grade_plan_case(_plan_case(), body2, None)
+    assert r2.metrics[M_BUDGET] == (False, 0.0) and any("超支" in f for f in r2.failures)
 
 
 def test_grade_chat_memory_recall_and_tools():

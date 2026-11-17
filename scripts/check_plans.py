@@ -1,21 +1,14 @@
-"""结构化检查脚本（TASKS 1.7）：批量跑 /api/plan 用例并断言硬约束——阶段 3 eval runner 的前身。
+"""结构化检查脚本（TASKS 1.7 → 阶段 3）：批量跑 plan 用例并断言。
 
 用法：
     .venv/Scripts/python.exe scripts/check_plans.py                  # 默认 eval_cases.jsonl
     .venv/Scripts/python.exe scripts/check_plans.py --include-hidden # 全量（最终验收口径，§14）
-    .venv/Scripts/python.exe scripts/check_plans.py --json out.json  # 机器可读结果（阶段 3 报告用）
+    .venv/Scripts/python.exe scripts/check_plans.py --json out.json  # 机器可读结果
 
-断言口径（对每条用例）：
-- status            期望 feasible / infeasible；
-- must_visit_covered必去点全部出现在行程中（仅 feasible 用例）；
-- budget_within     重算总花费 ≤ 请求预算（verification.recomputed_budget）；
-- time_window_violations 期望为 0：feasible 响应的 verification.violations 必须为空
-                   （时间窗/闭馆/时间线/预算/重复/覆盖任一冲突都会体现为 violation）；
-- reason_contains   infeasible 用例的原因列表包含指定子串。
-
+断言口径唯一来源 = app/eval/graders.grade_plan_case（与 eval runner 同一套，
+含 §12 的预算回显一致性与硬约束/行为分类）；chat 用例归 eval runner，此处跳过。
 运行方式：进程内 TestClient 走完整 HTTP 栈（含 422 校验与 runs/spans 落库），
-DATABASE_URL 指向临时库，不污染 data/tripagent.db。
-任一用例失败 exit 1。
+DATABASE_URL 指向临时库，不污染 data/tripagent.db。任一用例失败 exit 1。
 """
 
 from __future__ import annotations
@@ -53,11 +46,11 @@ def run_checks(cases: list[dict], include_hidden: bool) -> list[dict]:
 
 
 def _run_case(client, case: dict) -> dict:  # noqa: ANN001 —— TestClient
+    from app.eval.cases import PlanCase
+    from app.eval.graders import grade_plan_case
+
     case_id = case["case_id"]
-    req = case["request"]
-    asserts = case.get("asserts", {})
-    r = client.post("/api/plan", json=req)
-    failures: list[str] = []
+    r = client.post("/api/plan", json=case["request"])
 
     if r.status_code != 200:
         return {
@@ -68,41 +61,14 @@ def _run_case(client, case: dict) -> dict:  # noqa: ANN001 —— TestClient
         }
 
     body = r.json()
-    expect_status = asserts.get("status")
-    if expect_status and body["status"] != expect_status:
-        failures.append(f"status={body['status']}，期望 {expect_status}")
-
-    if body["status"] == "feasible":
-        all_pois = {s["poi"] for d in body["days"] for s in d["stops"]}
-        if asserts.get("must_visit_covered", True):
-            missing = set(req.get("must_visit", [])) - all_pois
-            if missing:
-                failures.append(f"必去点未覆盖: {sorted(missing)}")
-        if asserts.get("budget_within", True):
-            spent = body["verification"]["recomputed_budget"]
-            if spent > req["budget"] + 1e-6:
-                failures.append(f"预算超支: 重算 {spent} > {req['budget']}")
-        if asserts.get("time_window_violations", 0) == 0:
-            vs = body["verification"]["violations"]
-            if vs:
-                failures.append(f"校验器检出冲突: {[v['type'] for v in vs]}")
-        if asserts.get("days_count") and len(body["days"]) != asserts["days_count"]:
-            failures.append(f"天数 {len(body['days'])} != {asserts['days_count']}")
-    else:
-        if body["days"]:
-            failures.append("infeasible 却返回了行程（不允许硬凑）")
-        if not body["infeasible_reasons"]:
-            failures.append("infeasible 缺少原因")
-        for needle in asserts.get("reason_contains", []):
-            if not any(needle in reason for reason in body["infeasible_reasons"]):
-                failures.append(f"原因缺少子串 {needle!r}: {body['infeasible_reasons']}")
-
+    graded = grade_plan_case(
+        PlanCase.model_validate({**case, "kind": "plan"}), body, None)
     return {
         "case_id": case_id,
         "hidden": bool(case.get("hidden")),
-        "passed": not failures,
+        "passed": graded.passed,
         "status": body["status"],
-        "failures": failures,
+        "failures": graded.failures,
         "latency_ms": body["cost"]["latency_ms"],
         "recomputed_budget": body["verification"]["recomputed_budget"],
         "trace_id": body["trace_id"],

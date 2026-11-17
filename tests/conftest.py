@@ -22,6 +22,20 @@ import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 
+def parse_sse(text: str) -> list[tuple[str, dict]]:
+    """SSE 响应文本 → [(event, data)]（/api/chat 测试共用；运行时副本在 app.eval.runner）。"""
+    import json
+
+    events = []
+    for block in text.strip().split("\n\n"):
+        lines = block.split("\n")
+        if not lines or not lines[0].startswith("event: "):
+            continue
+        events.append(
+            (lines[0][len("event: "):], json.loads(lines[1][len("data: "):])))
+    return events
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _db():
     """session 级建表（与 Alembic 迁移同构）；不依赖 client 的纯 DB 测试也需要。"""

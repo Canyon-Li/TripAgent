@@ -107,7 +107,7 @@ def _run_plan_case(client, case) -> tuple[dict | None, str | None]:  # noqa: ANN
 
 def _run_chat_case(client, app, case, *, use_scripts: bool):  # noqa: ANN001
     """逐轮 POST /api/chat，收集每轮 done 事件；脚本模式下按轮安装 ScriptedLLM。"""
-    from app.api.chat import _get_llm_optional
+    from app.api.chat import get_llm_optional
 
     dones: list[dict] = []
     http_error: str | None = None
@@ -120,7 +120,7 @@ def _run_chat_case(client, app, case, *, use_scripts: bool):  # noqa: ANN001
         }
         if use_scripts:
             scripted = ScriptedLLM(turn.fake_llm)
-            app.dependency_overrides[_get_llm_optional] = lambda s=scripted: s
+            app.dependency_overrides[get_llm_optional] = lambda s=scripted: s
         try:
             r = client.post("/api/chat", json=payload)
             if r.status_code != 200:
@@ -138,7 +138,7 @@ def _run_chat_case(client, app, case, *, use_scripts: bool):  # noqa: ANN001
             dones.append(done)
         finally:
             if use_scripts:
-                app.dependency_overrides.pop(_get_llm_optional, None)
+                app.dependency_overrides.pop(get_llm_optional, None)
     return dones, http_error
 
 
@@ -168,7 +168,7 @@ def run_eval(
     from app.config import get_settings
     from app.db import models  # noqa: F401 —— 注册全部表
     from app.db.base import Base, engine
-    from app.eval import baseline_a, report
+    from app.eval import baseline_a, graders, report
     from app.eval.cases import load_eval_cases
     from app.eval.graders import CaseResult
     from app.llm.adapter import get_llm, llm_available
@@ -194,20 +194,21 @@ def run_eval(
                 columns["current"] = _run_column(
                     client, app, selected, use_scripts=not use_real)
             elif col == "B":
+                # B 列用 :B 后缀的 session/user 跑：写侧隔离——B 轮的 Ledger 写回
+                # 不 supersede current 轮记忆，也不向共享 user scope 写评测数据
                 with _with_memory_injection(False):
                     columns["B"] = _run_column(
-                        client, app, selected, use_scripts=not use_real)
+                        client, app, _isolate_for_b(selected), use_scripts=not use_real)
             elif col == "A":
                 if not use_real:
-                    columns["A"] = _skip_column(
-                        selected, "跳过：基线 A 需要真实 LLM（fake 模式无意义）")
+                    columns["A"] = []  # fake 模式无意义，报告标「未运行」而非伪 FAIL
                 else:
                     columns["A"] = baseline_a.run(selected, get_llm())
             else:
                 raise SystemExit(f"未知基线: {col}（current | A | B）")
 
     aggregates = {
-        name: report.aggregate_column(results) for name, results in columns.items()
+        name: graders.aggregate(results) for name, results in columns.items()
     }
     report_path = report.write_report(
         meta, columns, aggregates,
@@ -215,6 +216,7 @@ def run_eval(
         model=(settings.llm_model if use_real else "scripted-fake"),
         real_llm=use_real,
         include_hidden=include_hidden,
+        cases_path=str(cases_path),
     )
     if "current" in columns:
         report.persist_results(settings.git_sha, columns["current"])
@@ -244,10 +246,25 @@ def _run_column(client, app, cases, *, use_scripts: bool):  # noqa: ANN001
     return results
 
 
-def _skip_column(cases, reason: str) -> list:  # noqa: ANN001
-    from app.eval.graders import CaseResult
-    return [CaseResult(c.case_id, c.hidden, getattr(c, "kind", "plan"),
-                       passed=False, failures=[reason]) for c in cases]
+def _isolate_for_b(cases):  # noqa: ANN001
+    """B 列 chat 用例的 session/user 加 :B 后缀（跨会话用例的 turn.session_id 同理）。"""
+    from app.eval.cases import ChatCase
+
+    out = []
+    for c in cases:
+        if not isinstance(c, ChatCase):
+            out.append(c)
+            continue
+        turns = [
+            t.model_copy(update={"session_id": f"{t.session_id}:B"})
+            if t.session_id else t
+            for t in c.turns
+        ]
+        out.append(c.model_copy(update={
+            "session_id": f"{c.session_id}:B", "user_id": f"{c.user_id}:B",
+            "turns": turns,
+        }))
+    return out
 
 
 # ---------- CLI ----------

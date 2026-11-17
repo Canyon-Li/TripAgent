@@ -99,7 +99,7 @@ tests/          pytest（契约 / 求解 / 校验 / 属性 / 记忆一致性 / �
 
 ## CI
 
-GitHub Actions（[ci.yml](.github/workflows/ci.yml)）：`lint`（ruff）+ `test`（pytest，迁移后运行）+ `eval`（公开集 FakeLLM 确定性回归，对比 `reports/baseline.json`——硬约束类指标任一退化或 final_pass_rate 降 >2pp 即失败，§12）；main 分支保护要求 PR 必过这三项检查。
+GitHub Actions（[ci.yml](.github/workflows/ci.yml)）：`lint`（ruff）+ `test`（pytest，迁移后运行）+ `eval`（公开集 FakeLLM 确定性回归，对比 `reports/baseline.json`——硬约束类指标任一退化或 final_pass_rate 降 >2pp 即失败，§12）；main 分支保护要求 PR 必过这三项检查（复核：`gh api repos/Canyon-Li/TripAgent/branches/main/protection --jq .required_status_checks.contexts` → `["test","lint","eval"]`）。
 
 ## 状态与路线图
 
