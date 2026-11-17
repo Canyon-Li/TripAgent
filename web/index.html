@@ -8,6 +8,7 @@
     :root {
       --bg: #f6f7fb; --card: #ffffff; --ink: #1a1a2e; --sub: #6b7080;
       --accent: #2f5af5; --ok: #0f9d58; --bad: #d93025; --line: #e6e8f0;
+      --mem: #7b5cb8;
     }
     * { box-sizing: border-box; }
     body {
@@ -17,11 +18,12 @@
     .wrap { max-width: 960px; margin: 0 auto; }
     header h1 { font-size: 1.5rem; margin: 0 0 4px; }
     header p { color: var(--sub); margin: 0 0 24px; font-size: .9rem; }
-    .views { display: flex; gap: 8px; margin-bottom: 20px; }
+    .views { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
     .views span {
       font-size: .8rem; padding: 4px 12px; border-radius: 999px;
       background: var(--card); border: 1px solid var(--line); color: var(--sub);
     }
+    .views span[data-view] { cursor: pointer; }
     .views span.active { color: var(--accent); border-color: var(--accent); }
     .card {
       background: var(--card); border: 1px solid var(--line); border-radius: 12px;
@@ -69,58 +71,125 @@
     footer { text-align: center; color: var(--sub); font-size: .78rem; margin-top: 32px; }
     footer a { color: var(--accent); text-decoration: none; }
     .empty { color: var(--sub); font-size: .85rem; padding: 8px 0; }
+    /* ---- 对话视图（阶段 2）---- */
+    .chat-bar { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
+    .chat-bar > div { flex: 0 0 auto; }
+    .chat-bar .grow { flex: 1 1 200px; }
+    .session-chip {
+      font-size: .78rem; color: var(--sub); background: #eef0f6;
+      border-radius: 6px; padding: 6px 10px;
+    }
+    button.ghost {
+      margin-top: 0; background: #fff; color: var(--accent); border: 1px solid var(--accent);
+      padding: 8px 16px; border-radius: 8px; font-size: .85rem; cursor: pointer;
+    }
+    #msgs { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
+    .msg { max-width: 86%; border-radius: 12px; padding: 12px 16px; font-size: .92rem;
+           line-height: 1.55; }
+    .msg.user { align-self: flex-end; background: var(--accent); color: #fff; }
+    .msg.bot { align-self: flex-start; background: var(--card); border: 1px solid var(--line); }
+    .msg .stages { color: var(--sub); font-size: .74rem; margin-bottom: 6px; }
+    .msg .stages .deg { color: #b8860b; }
+    .msg .plan-area { margin-top: 10px; }
+    .msg .plan-area .banner, .msg .plan-area .day { margin-bottom: 10px; }
+    .badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+    .badge {
+      font-size: .72rem; border-radius: 999px; padding: 2px 10px;
+      border: 1px solid var(--line); color: var(--sub); background: #fff;
+    }
+    .badge.mem { border-color: var(--mem); color: var(--mem); background: #f4f0fb; }
+    .badge.req { border-color: var(--accent); color: var(--accent); background: #f0f4ff; }
+    .composer { display: flex; gap: 10px; margin-top: 16px; }
+    .composer input { flex: 1; }
+    .hint { color: var(--sub); font-size: .78rem; margin-top: 8px; }
   </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <h1>TripAgent · 多约束行程规划</h1>
-    <p>结构化约束 → OR-Tools 求解 → 独立校验器复核（project.md §8 / ADR-001）</p>
+    <p>结构化约束 → OR-Tools 求解 → 独立校验器复核；记忆层贯穿多轮对话（project.md §7–8 / ADR-001/003）</p>
   </header>
-  <div class="views">
-    <span class="active">行程视图 · 阶段 1</span>
+  <div class="views" id="views">
+    <span class="active" data-view="chat">行程对话 · 阶段 2</span>
+    <span data-view="plan">手动规划 · 阶段 1</span>
     <span>Trace 回放 · 阶段 3</span>
     <span>评测看板 · 阶段 3</span>
   </div>
 
-  <div class="card">
-    <div class="grid">
-      <div>
-        <label>城市</label>
-        <input value="北京（beijing）" disabled>
+  <!-- ============ 行程对话（阶段 2） ============ -->
+  <section id="view-chat">
+    <div class="card">
+      <div class="chat-bar">
+        <div>
+          <label>演示用户（B9：无登录，切换用户演示记忆隔离）</label>
+          <select id="user_sel">
+            <option value="u-alice">u-alice（爱丽丝）</option>
+            <option value="u-bob">u-bob（鲍勃）</option>
+          </select>
+        </div>
+        <div class="grow">
+          <label>当前会话</label>
+          <span class="session-chip" id="session_chip"></span>
+        </div>
+        <div>
+          <label>&nbsp;</label>
+          <button class="ghost" id="new_session">＋ 新会话</button>
+        </div>
       </div>
-      <div>
-        <label>天数</label>
-        <input id="days" type="number" min="1" max="7" value="3">
-      </div>
-      <div>
-        <label>总预算（元）</label>
-        <input id="budget" type="number" min="1" value="10000">
-      </div>
-      <div>
-        <label>每日在外时长上限（分钟）</label>
-        <input id="cap" type="number" min="60" max="720" step="30" value="480">
-      </div>
-      <div>
-        <label>出发日期</label>
-        <input id="start_date" type="date">
+      <p class="hint">
+        每轮全量重规划（B12）：试着第 1 轮定预算、第 2 轮加必去点、第 6 轮只改天数——
+        约束来源徽标会显示哪些约束来自记忆、首次提出于第几轮。
+      </p>
+      <div id="msgs"></div>
+      <div class="composer">
+        <input id="chat_input" placeholder="例如：预算 8000 玩 3 天，必去故宫" maxlength="2000">
+        <button class="primary" id="send" style="margin-top:0">发送</button>
       </div>
     </div>
-    <fieldset>
-      <legend>偏好类目（提高对应景点被选中的权重）</legend>
-      <div class="chips" id="prefs"></div>
-    </fieldset>
-    <fieldset>
-      <legend>必去点（硬约束，求解器优先保证覆盖）</legend>
-      <div class="pois" id="pois"></div>
-    </fieldset>
-    <button class="primary" id="go">生成行程</button>
-  </div>
+  </section>
 
-  <div id="result"></div>
+  <!-- ============ 手动规划（阶段 1） ============ -->
+  <section id="view-plan" hidden>
+    <div class="card">
+      <div class="grid">
+        <div>
+          <label>城市</label>
+          <input value="北京（beijing）" disabled>
+        </div>
+        <div>
+          <label>天数</label>
+          <input id="days" type="number" min="1" max="7" value="3">
+        </div>
+        <div>
+          <label>总预算（元）</label>
+          <input id="budget" type="number" min="1" value="10000">
+        </div>
+        <div>
+          <label>每日在外时长上限（分钟）</label>
+          <input id="cap" type="number" min="60" max="720" step="30" value="480">
+        </div>
+        <div>
+          <label>出发日期</label>
+          <input id="start_date" type="date">
+        </div>
+      </div>
+      <fieldset>
+        <legend>偏好类目（提高对应景点被选中的权重）</legend>
+        <div class="chips" id="prefs"></div>
+      </fieldset>
+      <fieldset>
+        <legend>必去点（硬约束，求解器优先保证覆盖）</legend>
+        <div class="pois" id="pois"></div>
+      </fieldset>
+      <button class="primary" id="go">生成行程</button>
+    </div>
+    <div id="result"></div>
+  </section>
 
   <footer>
     API 文档 <a id="docs" href="#">/docs</a> ｜ 探针 <a id="hz" href="#">/healthz</a> ｜
+    记忆回放 <a id="memlink" href="#">/api/memory/events</a> ｜
     数据来源：高德导出 + 人工校对（见 README）
   </footer>
 </div>
@@ -131,6 +200,7 @@
 const API_BASE = new URLSearchParams(location.search).get("api") || "";
 document.getElementById("docs").href = API_BASE + "/docs";
 document.getElementById("hz").href = API_BASE + "/healthz";
+document.getElementById("memlink").href = API_BASE + "/api/memory/events";
 document.getElementById("start_date").value = new Date().toISOString().slice(0, 10);
 
 const CATS = ["history", "food", "nature", "modern", "shopping", "museum", "religion", "landmark"];
@@ -138,6 +208,62 @@ const CAT_NAMES = { history: "历史", food: "美食", nature: "自然", modern:
                     shopping: "购物", museum: "博物馆", religion: "宗教", landmark: "地标" };
 const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
+/* ---------------- tab 切换 ---------------- */
+const PANES = { chat: "view-chat", plan: "view-plan" };
+document.querySelectorAll("#views span[data-view]").forEach(t => {
+  t.addEventListener("click", () => {
+    document.querySelectorAll("#views span").forEach(x => x.classList.remove("active"));
+    t.classList.add("active");
+    Object.values(PANES).forEach(id => document.getElementById(id).hidden = true);
+    document.getElementById(PANES[t.dataset.view]).hidden = false;
+  });
+});
+
+/* ---------------- 公共：行程卡渲染（两个视图共用） ---------------- */
+function itineraryHtml(b, budgetEcho) {
+  const feasible = b.status === "feasible";
+  const v = b.verification ?? { violations: [], recomputed_budget: 0 };
+  let html = feasible
+    ? `<div class="banner ok">✓ 可行 —— 独立校验器复核通过：时间窗冲突 0、预算 ${v.recomputed_budget} 元 ≤ ${budgetEcho} 元</div>`
+    : `<div class="banner bad">✗ 不可行（不硬凑行程，原因如下）</div><ul class="reasons">` +
+      (b.infeasible_reasons ?? []).map(x => `<li>${x}</li>`).join("") + "</ul>";
+  html += `<p class="meta">trace_id <code>${b.trace_id}</code> ` +
+    `｜ 求解 ${b.solver.wall_ms}ms（目标 ${b.solver.objective}，阶段 ${b.solver.phases.join("→")}）` +
+    `｜ 端到端 ${b.cost.latency_ms}ms ｜ ` +
+    `<a href="${API_BASE}/api/runs/${b.trace_id}" target="_blank">查看 spans →</a></p>`;
+  if (feasible) {
+    b.days.forEach(d => {
+      const wd = WEEKDAYS[new Date(d.date + "T00:00:00").getDay()];
+      html += `<div class="card day"><h3>第 ${d.date_index + 1} 天 · ${d.date} ${wd}` +
+        `<small>${d.depart} 出发 → ${d.return} 回酒店 · 在外 ${d.away_minutes} 分钟</small></h3>`;
+      if (!d.stops.length) {
+        html += '<p class="empty">本日自由活动（未安排景点）</p></div>';
+        return;
+      }
+      html += "<table><tr><th>时间</th><th>景点</th><th>等候</th><th>门票</th></tr>";
+      d.stops.forEach(s => {
+        html += `<tr><td class="time">${s.arrive} – ${s.leave}</td>` +
+          `<td>${s.name}<span class="tag">${CAT_NAMES[s.category] || s.category}</span></td>` +
+          `<td>${s.wait_min ? `<span class="wait">等 ${s.wait_min} 分钟</span>` : "—"}</td>` +
+          `<td>${s.ticket ? "¥" + s.ticket : '<span class="free">免费</span>'}</td></tr>`;
+      });
+      html += "</table></div>";
+    });
+    html += `<p class="meta">重算总花费 ${v.recomputed_budget} 元（门票 + 出租车启发式车费）</p>`;
+  }
+  return html;
+}
+
+function constraintBadges(ac) {
+  return (ac.constraints ?? []).map(c => {
+    const fromMem = String(c.source).startsWith("memory_views#");
+    const val = typeof c.value === "object" ? JSON.stringify(c.value) : c.value;
+    return `<span class="badge ${fromMem ? "mem" : "req"}" ` +
+      `title="来源 ${c.source}">${c.field} = ${val} · ${fromMem ? "记忆" : "本轮"} · 第 ${c.turn} 轮</span>`;
+  }).join("");
+}
+
+/* ---------------- 手动规划（阶段 1） ---------------- */
 function chip(text, value, groupName) {
   const el = document.createElement("label");
   el.className = "chip";
@@ -146,11 +272,9 @@ function chip(text, value, groupName) {
   return el;
 }
 
-// 偏好 chips
 const prefsEl = document.getElementById("prefs");
 CATS.forEach(c => prefsEl.appendChild(chip(`${CAT_NAMES[c]} (${c})`, c, "pref")));
 
-// 必去点列表：加载 /api/pois
 fetch(API_BASE + "/api/pois").then(r => r.json()).then(pois => {
   const el = document.getElementById("pois");
   pois.forEach(p => {
@@ -172,8 +296,6 @@ fetch(API_BASE + "/api/pois").then(r => r.json()).then(pois => {
 function picked(groupName) {
   return [...document.querySelectorAll(`input[name=${groupName}]:checked`)].map(i => i.value);
 }
-
-const fmt = m => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 
 document.getElementById("go").addEventListener("click", async () => {
   const btn = document.getElementById("go");
@@ -202,7 +324,9 @@ document.getElementById("go").addEventListener("click", async () => {
         `<pre>${JSON.stringify(body.detail ?? body, null, 2)}</pre>`;
       return;
     }
-    render(body, payload);
+    let html = itineraryHtml(body, payload.budget);
+    html += `<p class="meta">约束来源 ${body.applied_constraints.source} · 第 ${body.applied_constraints.turn} 轮</p>`;
+    out.innerHTML = html;
   } catch (e) {
     out.innerHTML = `<div class="banner bad">请求失败：${e}</div>`;
   } finally {
@@ -210,43 +334,169 @@ document.getElementById("go").addEventListener("click", async () => {
   }
 });
 
-function render(b, req) {
-  const out = document.getElementById("result");
-  const feasible = b.status === "feasible";
-  const v = b.verification ?? { violations: [], recomputed_budget: 0 };
-  let html = feasible
-    ? `<div class="banner ok">✓ 可行 —— 独立校验器复核通过：时间窗冲突 0、预算 ${v.recomputed_budget} 元 ≤ ${req.budget} 元</div>`
-    : `<div class="banner bad">✗ 不可行（不硬凑行程，原因如下）</div><ul class="reasons">` +
-      (b.infeasible_reasons ?? []).map(x => `<li>${x}</li>`).join("") + "</ul>";
+/* ---------------- 行程对话（阶段 2）：SSE 流消费 ---------------- */
+let CHAT_USER = "u-alice";
+let CHAT_SESSION = newSessionId();
 
-  html += `<p class="meta">trace_id <code>${b.trace_id}</code> ` +
-    `｜ 求解 ${b.solver.wall_ms}ms（目标 ${b.solver.objective}，阶段 ${b.solver.phases.join("→")}）` +
-    `｜ 端到端 ${b.cost.latency_ms}ms ｜ ` +
-    `<a href="${API_BASE}/api/runs/${b.trace_id}" target="_blank">查看 spans →</a></p>`;
-
-  if (feasible) {
-    b.days.forEach(d => {
-      const wd = WEEKDAYS[new Date(d.date + "T00:00:00").getDay()];
-      html += `<div class="card day"><h3>第 ${d.date_index + 1} 天 · ${d.date} ${wd}` +
-        `<small>${d.depart} 出发 → ${d.return} 回酒店 · 在外 ${d.away_minutes} 分钟</small></h3>`;
-      if (!d.stops.length) {
-        html += '<p class="empty">本日自由活动（未安排景点）</p></div>';
-        return;
-      }
-      html += "<table><tr><th>时间</th><th>景点</th><th>等候</th><th>门票</th></tr>";
-      d.stops.forEach(s => {
-        html += `<tr><td class="time">${s.arrive} – ${s.leave}</td>` +
-          `<td>${s.name}<span class="tag">${CAT_NAMES[s.category] || s.category}</span></td>` +
-          `<td>${s.wait_min ? `<span class="wait">等 ${s.wait_min} 分钟</span>` : "—"}</td>` +
-          `<td>${s.ticket ? "¥" + s.ticket : '<span class="free">免费</span>'}</td></tr>`;
-      });
-      html += "</table></div>";
-    });
-    html += `<p class="meta">重算总花费 ${v.recomputed_budget} 元（门票 + 出租车启发式车费）` +
-      `｜ 约束来源 ${b.applied_constraints.source} · 第 ${b.applied_constraints.turn} 轮</p>`;
-  }
-  out.innerHTML = html;
+function newSessionId() {
+  return "s-web-" + Math.random().toString(36).slice(2, 8);
 }
+
+function refreshSessionChip() {
+  document.getElementById("session_chip").textContent =
+    `${CHAT_SESSION}（用户 ${CHAT_USER}）`;
+}
+
+document.getElementById("user_sel").addEventListener("change", e => {
+  CHAT_USER = e.target.value;
+  refreshSessionChip();
+  botNotice(`已切换到用户 ${CHAT_USER}——该用户的跨会话记忆会自动注入，与他人互不可见（B9）。`);
+});
+
+document.getElementById("new_session").addEventListener("click", () => {
+  CHAT_SESSION = newSessionId();
+  document.getElementById("msgs").innerHTML = "";
+  refreshSessionChip();
+  botNotice(`新会话 ${CHAT_SESSION} 开始。${CHAT_USER} 的 user 级约束（如预算习惯）仍会跨会话注入；点“＋ 新会话”可随时重置演示。`);
+});
+
+function el(tag, cls, html) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (html !== undefined) n.innerHTML = html;
+  return n;
+}
+
+function appendMsg(cls) {
+  const node = el("div", `msg ${cls}`);
+  document.getElementById("msgs").appendChild(node);
+  node.scrollIntoView({ behavior: "smooth", block: "end" });
+  return node;
+}
+
+function botNotice(text) {
+  const n = appendMsg("bot");
+  n.appendChild(el("div", null, text));
+}
+
+const STAGE_LABELS = { memory: "记忆读取", resolver: "意图解析", "memory.write": "约束写回",
+                       solver: "求解", verifier: "独立校验" };
+
+function makeBotBubble() {
+  const node = appendMsg("bot");
+  const stages = el("div", "stages", "…");
+  const reply = el("div", "reply", "");
+  const planArea = el("div", "plan-area", "");
+  node.append(stages, reply, planArea);
+  return { node, stages, reply, planArea, text: "", traceId: null,
+           stageList: [], violations: [] };
+}
+
+function renderStages(ctx) {
+  const parts = ctx.stageList.map(s => {
+    const label = STAGE_LABELS[s.name] || s.name;
+    const deg = s.degraded ? '<span class="deg">（规则模板降级）</span>' : "";
+    const viol = (s.guardrail_violations ?? []).length
+      ? ` <span class="deg" title="${s.guardrail_violations.join("；")}">⚠护栏${s.guardrail_violations.length}</span>` : "";
+    return label + deg + viol;
+  });
+  ctx.stages.innerHTML = parts.length ? parts.join(" → ") : "…";
+}
+
+function finishBubble(ctx, done) {
+  ctx.traceId = done.trace_id;
+  const llm = done.llm ?? {};
+  ctx.stageList.push({ name: "回复", degraded: llm.degraded });
+  renderStages(ctx);
+  if (done.type === "clarification") {
+    ctx.reply.innerHTML = `❓ <b>需要澄清（${done.field}）</b>：${done.reason}`;
+    ctx.node.scrollIntoView({ behavior: "smooth", block: "end" });
+    return;
+  }
+  const plan = done.plan;
+  const ac = plan.applied_constraints ?? {};
+  let html = `<div class="badges">${constraintBadges(ac)}</div>`;
+  html += itineraryHtml(plan, ac.budget);
+  html += `<p class="meta">第 ${done.turn} 轮 ｜ LLM 调用 ${llm.llm_calls ?? 0} 次` +
+    `${llm.degraded ? "（含降级）" : ""} ｜ token ${llm.token_in ?? 0}+${llm.token_out ?? 0}` +
+    ` ｜ <a href="${API_BASE}/api/memory/events?session_id=${CHAT_SESSION}" target="_blank">回放 Ledger →</a></p>`;
+  ctx.planArea.innerHTML = html;
+  ctx.node.scrollIntoView({ behavior: "smooth", block: "end" });
+}
+
+async function sendChat() {
+  const input = document.getElementById("chat_input");
+  const btn = document.getElementById("send");
+  const text = input.value.trim();
+  if (!text || btn.disabled) return;
+  input.value = "";
+  appendMsg("user").innerHTML = text.replace(/</g, "&lt;");
+  btn.disabled = true;
+  const ctx = makeBotBubble();
+  ctx.stageList.push({ name: "开始", degraded: false });
+  renderStages(ctx);
+  try {
+    const resp = await fetch(API_BASE + "/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: CHAT_SESSION, user_id: CHAT_USER, message: text }),
+    });
+    if (!resp.ok || !resp.body) {
+      ctx.reply.innerHTML = `<div class="banner bad">请求失败（${resp.status}）</div>`;
+      return;
+    }
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const block = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        handleSseBlock(ctx, block);
+      }
+    }
+    if (buf.trim()) handleSseBlock(ctx, buf);  // 无结尾空块的残余
+  } catch (e) {
+    ctx.reply.innerHTML += `<div class="banner bad">连接中断：${e}</div>`;
+  } finally {
+    btn.disabled = false;
+    input.focus();
+  }
+}
+
+function handleSseBlock(ctx, block) {
+  const lines = block.split("\n").filter(Boolean);
+  const evLine = lines.find(l => l.startsWith("event: "));
+  const dataLine = lines.find(l => l.startsWith("data: "));
+  if (!evLine || !dataLine) return;
+  const ev = evLine.slice(7).trim();
+  let data;
+  try { data = JSON.parse(dataLine.slice(6)); } catch { return; }
+  if (ev === "stage") {
+    ctx.stageList.push(data);
+    renderStages(ctx);
+  } else if (ev === "delta") {
+    ctx.text += data.text;
+    ctx.reply.innerHTML = ctx.text.replace(/</g, "&lt;").replace(/\n/g, "<br>");
+    ctx.node.scrollIntoView({ behavior: "smooth", block: "end" });
+  } else if (ev === "clarification") {
+    /* done 事件统一渲染 */
+  } else if (ev === "done") {
+    finishBubble(ctx, data);
+  }
+}
+
+document.getElementById("send").addEventListener("click", sendChat);
+document.getElementById("chat_input").addEventListener("keydown", e => {
+  if (e.key === "Enter") sendChat();
+});
+
+refreshSessionChip();
+botNotice("你好！我是 TripAgent。告诉我预算、天数、想去的景点，我会用约束求解器排出可执行的行程，并全程记住你的约束。");
 </script>
 </body>
 </html>
