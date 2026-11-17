@@ -1,6 +1,6 @@
-# TASKS — 阶段 0–1 任务清单
+# TASKS — 阶段 0–2 任务清单
 
-> 边界依据 `project.md` §0（B1–B13）。勾选即完成；每阶段验收口径写在节末，验收通过即冻结该阶段（§14 范围控制）。阶段 2–4 清单在阶段 1 冻结后按同样格式拆出。
+> 边界依据 `project.md` §0（B1–B17）。勾选即完成；每阶段验收口径写在节末，验收通过即冻结该阶段（§14 范围控制）。阶段 3–4 清单在阶段 2 冻结后按同样格式拆出。
 
 ## 阶段 0 · 资源就绪
 
@@ -36,8 +36,26 @@
 
 ---
 
-## 后续阶段（占位，阶段 1 冻结后细化）
+## 阶段 2 · 记忆层与多轮对话
 
-- **阶段 2 · 记忆层**：Ledger / Views / Policy、多轮约束演进对话（B12）、跨会话演示（B9 用户切换）、Resolver 白名单 function calling 与护栏（B14 / ADR-008）
+**目标**：Ledger / Views / Policy 三件套（ADR-003）+ Resolver 白名单 function calling（B14 / ADR-008）+ `POST /api/chat` 多轮约束演进对话（B12，每轮全量重规划）+ 跨会话用户切换演示（B9）。验收口径（§13）：**第 6 轮约束回显正确，Ledger 可回放，跨会话用户隔离可演示**。
+
+- [ ] **2.1 记忆表迁移**：`memory_events` / `memory_views`（§9 DDL）SQLAlchemy 模型 + Alembic 迁移（down_revision=12cd442bb18f）
+- [ ] **2.2 Ledger 追加写 + Policy**：append（assertion 逐字段 / observation 用户轮次原话）、`supersedes_id` 矛盾归档（不物理删除）、写入边际价值判定（只写本轮显式新出/变化字段）、turn 计数、retract
+- [ ] **2.3 Views 派生与重建**：assertion 写入后增量更新 hard_constraints view（valid_to 关旧、derived_from=event ids）；`rebuild_views()` 清空重放全量 Ledger，前后一致（§13「可回放」）
+- [ ] **2.4 Memory.read 注入链**：scope 链 session→user→global 过滤 → 时间衰减加权（读时动态算，硬约束不因衰减丢弃）→ 置信度排序 → 结构化硬约束对象 + 逐条 provenance（event_id/turn/source）
+- [ ] **2.5 LLM 适配器**：`LLMAdapter` Protocol + DeepSeekAdapter（OpenAI-compatible，超时/重试/token 统计，B3 可插拔）+ FastAPI 依赖注入口；tests 用 FakeLLM 脚本化替身（CI 无 key 全确定性）
+- [ ] **2.6 Resolver 白名单护栏**：三工具 JSON Schema（`submit_plan_request` / `ask_clarification` / `recall_constraint`）+ 护栏（非白名单拒绝记违规、单次 ≤3 调用、参数 Pydantic 强校验、缺 budget 且无记忆 → 澄清不编造）+ LLM 失败规则模板降级（§7.1）
+- [ ] **2.7 POST /api/chat SSE 主链路**：observation 落账 → Resolver → Memory.read 权威注入（+ `recall_constraint` 辅助，两路去重合并 B15）→ 全量重规划（solve+verify，与 /api/plan 共用 pipeline）→ Responder（LLM 解释/降级模板）；SSE 事件 start/stage/clarification/delta/done/error；spans 六段；`applied_constraints.constraints[]` 逐字段回显来源与轮次
+- [ ] **2.8 记忆回放 API + 用户隔离**：`GET /api/memory/events|views`、`POST /api/memory/rebuild`（返回一致性结果）；user scope 跨 session 注入、用户 A 约束不泄给 B（B9）
+- [ ] **2.9 前端对话视图**：tab 真切换；用户切换器（u-alice/u-bob）+ 新会话；消息流 + fetch-stream 消费 SSE；行程卡渲染复用；约束来源徽标（memory_views#N / 轮次）
+- [ ] **2.10 一致性验收**：①6 轮演进，第 6 轮 applied_constraints.budget=首轮值、source 指向记忆事件、turn=1（memory_recall@6）②改预算 → supersede 归档，Ledger 两条均可回放 ③rebuild 前后一致 ④用户隔离；阶段 1 回归（check_plans + pytest 全绿）
+
+**验收**：第 6 轮约束回显正确（source/turn 指向记忆事件）；`POST /api/memory/rebuild` 重放后 views 与增量更新一致；跨会话（同 user 新 session）约束仍注入、切换用户不串扰；`pytest -q` 全绿 + ruff clean；浏览器实测多轮对话与用户切换。
+
+---
+
+## 后续阶段（占位，阶段 2 冻结后细化）
+
 - **阶段 3 · 评测观测**：40 条全集、双基线（ADR-006）、Trace 瀑布图、看板、CI 回归阻断
 - **阶段 4 · 平台化**：Registry、健康检查、solver v1/v2 灰度回滚（ADR-007）、故障注入测试、只读 Agent Card（ADR-009）
