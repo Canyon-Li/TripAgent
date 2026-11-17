@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TripAgent</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 12vh auto; padding: 0 24px; color: #1a1a2e; }
+    h1 { font-size: 1.6rem; }
+    code { background: #f0f0f5; padding: 2px 6px; border-radius: 4px; }
+    ul { line-height: 1.9; color: #444; }
+  </style>
+</head>
+<body>
+  <h1>TripAgent · 多约束行程 Agent</h1>
+  <p>静态前端骨架（阶段 0）。三个视图按 project.md §5 逐步落地：</p>
+  <ul>
+    <li>行程对话视图 —— 阶段 1（<code>POST /api/plan</code> 渲染逐日行程卡）</li>
+    <li>Trace 回放视图 —— 阶段 3（<code>GET /api/runs/{trace_id}</code> 瀑布图）</li>
+    <li>评测看板 —— 阶段 3（<code>GET /api/eval/reports</code> 指标趋势）</li>
+  </ul>
+  <p>API 文档：<a href="http://localhost:8000/docs">http://localhost:8000/docs</a>｜探针：<a href="http://localhost:8000/healthz">/healthz</a></p>
+</body>
+</html>
