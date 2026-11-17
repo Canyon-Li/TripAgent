@@ -28,6 +28,7 @@ from app.config import get_settings
 from app.db import runs as runs_db
 from app.db.repository import get_repository
 from app.llm.adapter import LLMAdapter, UsageMeter, get_llm, llm_available
+from app.llm.tools import PREFERENCE_KEYWORDS
 from app.memory import ledger, policy, service, views
 from app.runtime.pipeline import run_plan_pipeline
 from app.runtime.resolver import resolve
@@ -68,7 +69,7 @@ def _build_history(session_id: str) -> list[dict[str, str]]:
 def _normalize_fields(
     fields: dict[str, Any], poi_index: tuple[tuple[str, str], ...]
 ) -> tuple[dict[str, Any], list[str]]:
-    """数据级护栏：must_visit 名称→id 映射，未知条目剔除并记违规。"""
+    """数据级护栏：LLM 常输出中文名/中文类目而非 id——统一映射，未知条目剔除记违规。"""
     violations: list[str] = []
     must = fields.get("must_visit")
     if must:
@@ -87,6 +88,24 @@ def _normalize_fields(
             fields["must_visit"] = normalized
         else:
             fields.pop("must_visit", None)
+    prefs = fields.get("preferences")
+    if prefs:
+        # 中文类目词 → id（如“历史”→history；规则模板解析的 PREFERENCE_KEYWORDS 反查）
+        word_to_cat = {w: cat for cat, words in PREFERENCE_KEYWORDS.items() for w in words}
+        valid_cats = set(PREFERENCE_KEYWORDS)
+        normalized, seen = [], set()
+        for item in prefs:
+            cat = item if item in valid_cats else word_to_cat.get(item)
+            if cat is None:
+                violations.append(f"unknown_preference_dropped:{item}")
+                continue
+            if cat not in seen:
+                seen.add(cat)
+                normalized.append(cat)
+        if normalized:
+            fields["preferences"] = normalized
+        else:
+            fields.pop("preferences", None)
     return fields, violations
 
 

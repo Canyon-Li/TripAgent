@@ -140,3 +140,18 @@ def test_unknown_poi_name_mapped_and_unknown_dropped(install_llm, client):
     assert "unknown_poi_dropped:不存在的地方" in stage["guardrail_violations"]
     pois = {s["poi"] for d in done["plan"]["days"] for s in d["stops"]}
     assert "forbidden_city" in pois
+
+
+def test_chinese_preference_normalized_to_category_id(install_llm, client):
+    """真实 DeepSeek 实测发现：模型常输出中文类目（“历史”）而非 id——须归一化。"""
+    fake = FakeLLM([
+        tool_call_result(("submit_plan_request", json.dumps(
+            {"budget": 10000, "days": 1, "preferences": ["历史", "美食", "不存在的类目"]}))),
+    ])
+    install_llm(fake)
+    events = _post(client, "喜欢历史和美食", session="sc-pref", user="u-t7")
+    done = events[-1][1]
+    by_field = {c["field"]: c for c in done["plan"]["applied_constraints"]["constraints"]}
+    assert by_field["preferences"]["value"] == ["history", "food"]
+    stage = next(d for e, d in events if e == "stage" and d.get("name") == "resolver")
+    assert "unknown_preference_dropped:不存在的类目" in stage["guardrail_violations"]
