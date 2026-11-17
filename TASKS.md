@@ -8,8 +8,8 @@
 
 - [x] **0.1 仓库初始化**：`git init`、创建 GitHub 公开仓、main 分支保护（Actions 通过才可合并）、`.gitignore`（.env / data/*.db / reports/ 是否入库另行决定）✅ 2026-11-17 [Canyon-Li/TripAgent](https://github.com/Canyon-Li/TripAgent)；分支保护：必需检查 `test`/`lint`（0.8 CI 落地后对 PR 生效）+ 禁 force push / 删除；reports/ 暂定入库（.gitignore 内注释可切换）
 - [x] **0.2 Python 工程**：Python 3.11 + `pyproject.toml`（fastapi / uvicorn / pydantic / ortools / sqlalchemy / alembic / httpx / pytest / openai），Windows 原生可装（B13）✅ 2026-11-17 CPython 3.11.15 + uv venv 安装验证通过（48 包 `uv pip check` 全绿，ortools 9.15 Routing 导入正常）；dev 附加 pytest / ruff
-- [ ] **0.3 密钥申请**：DeepSeek API key（B3）、高德 Web 服务 key（B6，仅导出脚本用）
-- [ ] **0.4 POI 数据集** `data/pois.json`：高德导出北京 18–30 个 POI（名称/坐标/地址），**人工校对**营业时间、门票、建议时长、评分；每条带 `export_date` 与 `source`
+- [x] **0.3 密钥申请**：DeepSeek API key（B3）、高德 Web 服务 key（B6，仅导出脚本用）✅ 2026-11-17 两个 key 均实测通过（DeepSeek /models 可用模型 deepseek-flash / deepseek-v4-pro；高德 place/text v3 命中正常），已填入本地 `.env`
+- [ ] **0.4 POI 数据集** `data/pois.json`：高德导出北京 18–30 个 POI（名称/坐标/地址），**人工校对**营业时间、门票、建议时长、评分；每条带 `export_date` 与 `source`　🟡 2026-11-17 导出完成：`scripts/export_pois.py`（可复跑）→ 23 个 POI、0 缺失、字段校验通过；营业时间/门票/时长/评分初值已带 `needs_review` 标记，**人工校对待办**
 - [ ] **0.5 距离矩阵** `data/matrix.json`：一次性预计算 n×n 耗时（高德驾车优先，OSRM 兜底，B7），含生成脚本 `scripts/build_matrix.py`（可复跑、记录参数）
 - [ ] **0.6 服务骨架**：FastAPI 入口 + `/healthz` `/readyz`（返回 version + git_sha）+ Alembic 初始迁移建 `runs` / `spans` 表
 - [ ] **0.7 容器化**：`docker-compose.yml`（api / web）+ `.env.example`（对齐 §11.2）+ Windows 本地与 VPS 各验证一次（B4 / B13）
