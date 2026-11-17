@@ -20,14 +20,15 @@ def test_refresh_creates_view_with_provenance():
 
 
 def test_refresh_supersedes_old_view_version():
+    # 库里可能有其他测试留下的 view（如全局 rebuild 的补建），只断言本测试语义：
+    # 新版本成为唯一活跃版本；本测试写出的旧版本 valid_to 已关闭
     policy.apply_assertions(session_id="sv-2", user_id="u-b", fields={"budget": 10000}, turn=1)
-    views.refresh_view("user:u-b")
+    v_old = views.refresh_view("user:u-b")
     policy.apply_assertions(session_id="sv-2", user_id="u-b", fields={"budget": 8000}, turn=3)
     v2 = views.refresh_view("user:u-b")
     assert v2["value"]["constraints"]["budget"] == 8000
     assert views.current_view("user:u-b")["id"] == v2["id"]
 
-    # 旧版本 valid_to 已关闭（历史版本可查、可回放）
     from sqlalchemy import select  # noqa: E402
 
     from app.db.base import SessionLocal  # noqa: E402
@@ -37,9 +38,9 @@ def test_refresh_supersedes_old_view_version():
         all_versions = db.scalars(
             select(MemoryView).where(MemoryView.subject_key == "user:u-b")
         ).all()
-    assert len(all_versions) == 2
-    closed = [v for v in all_versions if v.id != v2["id"]]
-    assert closed and closed[0].valid_to is not None
+    active_ids = {v.id for v in all_versions if v.valid_to is None}
+    assert active_ids == {v2["id"]}  # 唯一活跃
+    assert v_old["id"] not in active_ids  # 旧版本已关闭（历史可查、可回放）
 
 
 def test_retract_removed_from_view():
