@@ -36,3 +36,7 @@ select = ["E", "F", "I", "W", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# tests/ 无 __init__.py，pytest 默认只把 tests/ 本身入 sys.path——
+# `from tests.fakes import` 需要仓库根在 sys.path（CI 的裸 `pytest -q` 不含 cwd）；
+# 本地 `python -m pytest` 因 cwd 注入一直掩盖了这一点
+pythonpath = ["."]
