@@ -3,22 +3,250 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TripAgent</title>
+  <title>TripAgent · 行程规划</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 12vh auto; padding: 0 24px; color: #1a1a2e; }
-    h1 { font-size: 1.6rem; }
-    code { background: #f0f0f5; padding: 2px 6px; border-radius: 4px; }
-    ul { line-height: 1.9; color: #444; }
+    :root {
+      --bg: #f6f7fb; --card: #ffffff; --ink: #1a1a2e; --sub: #6b7080;
+      --accent: #2f5af5; --ok: #0f9d58; --bad: #d93025; --line: #e6e8f0;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg); color: var(--ink); margin: 0; padding: 32px 16px 64px;
+    }
+    .wrap { max-width: 960px; margin: 0 auto; }
+    header h1 { font-size: 1.5rem; margin: 0 0 4px; }
+    header p { color: var(--sub); margin: 0 0 24px; font-size: .9rem; }
+    .views { display: flex; gap: 8px; margin-bottom: 20px; }
+    .views span {
+      font-size: .8rem; padding: 4px 12px; border-radius: 999px;
+      background: var(--card); border: 1px solid var(--line); color: var(--sub);
+    }
+    .views span.active { color: var(--accent); border-color: var(--accent); }
+    .card {
+      background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+      padding: 20px; margin-bottom: 16px;
+    }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
+    label { font-size: .8rem; color: var(--sub); display: block; margin-bottom: 4px; }
+    input, select {
+      width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+      font-size: .9rem; background: #fff; color: var(--ink);
+    }
+    fieldset { border: none; padding: 0; margin: 14px 0 0; }
+    legend { font-size: .8rem; color: var(--sub); margin-bottom: 8px; padding: 0; }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 6px; font-size: .82rem;
+      border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px;
+      cursor: pointer; user-select: none; background: #fff;
+    }
+    .chip input { width: auto; }
+    .chip.on { border-color: var(--accent); color: var(--accent); background: #f0f4ff; }
+    .pois { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; }
+    button.primary {
+      margin-top: 18px; background: var(--accent); color: #fff; border: none;
+      padding: 10px 26px; border-radius: 8px; font-size: .95rem; cursor: pointer;
+    }
+    button.primary:disabled { opacity: .5; cursor: wait; }
+    .banner { border-radius: 10px; padding: 12px 16px; font-size: .9rem; margin-bottom: 14px; }
+    .banner.ok { background: #e6f4ea; color: var(--ok); }
+    .banner.bad { background: #fce8e6; color: var(--bad); }
+    .meta { color: var(--sub); font-size: .8rem; margin-bottom: 18px; }
+    .meta code { background: #eef0f6; padding: 1px 6px; border-radius: 4px; }
+    .day { margin-bottom: 18px; }
+    .day h3 { display: flex; justify-content: space-between; font-size: .95rem; margin: 0 0 8px; }
+    .day h3 small { color: var(--sub); font-weight: normal; }
+    table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+    th { color: var(--sub); font-weight: 500; font-size: .78rem; }
+    td.time { font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .tag { font-size: .72rem; color: var(--sub); border: 1px solid var(--line);
+           border-radius: 4px; padding: 0 5px; margin-left: 6px; }
+    .wait { color: #b8860b; font-size: .78rem; }
+    .free { color: var(--ok); }
+    ul.reasons { margin: 8px 0 0; padding-left: 20px; color: var(--bad); font-size: .88rem; }
+    footer { text-align: center; color: var(--sub); font-size: .78rem; margin-top: 32px; }
+    footer a { color: var(--accent); text-decoration: none; }
+    .empty { color: var(--sub); font-size: .85rem; padding: 8px 0; }
   </style>
 </head>
 <body>
-  <h1>TripAgent · 多约束行程 Agent</h1>
-  <p>静态前端骨架（阶段 0）。三个视图按 project.md §5 逐步落地：</p>
-  <ul>
-    <li>行程对话视图 —— 阶段 1（<code>POST /api/plan</code> 渲染逐日行程卡）</li>
-    <li>Trace 回放视图 —— 阶段 3（<code>GET /api/runs/{trace_id}</code> 瀑布图）</li>
-    <li>评测看板 —— 阶段 3（<code>GET /api/eval/reports</code> 指标趋势）</li>
-  </ul>
-  <p>API 文档：<a href="http://localhost:8000/docs">http://localhost:8000/docs</a>｜探针：<a href="http://localhost:8000/healthz">/healthz</a></p>
+<div class="wrap">
+  <header>
+    <h1>TripAgent · 多约束行程规划</h1>
+    <p>结构化约束 → OR-Tools 求解 → 独立校验器复核（project.md §8 / ADR-001）</p>
+  </header>
+  <div class="views">
+    <span class="active">行程视图 · 阶段 1</span>
+    <span>Trace 回放 · 阶段 3</span>
+    <span>评测看板 · 阶段 3</span>
+  </div>
+
+  <div class="card">
+    <div class="grid">
+      <div>
+        <label>城市</label>
+        <input value="北京（beijing）" disabled>
+      </div>
+      <div>
+        <label>天数</label>
+        <input id="days" type="number" min="1" max="7" value="3">
+      </div>
+      <div>
+        <label>总预算（元）</label>
+        <input id="budget" type="number" min="1" value="10000">
+      </div>
+      <div>
+        <label>每日在外时长上限（分钟）</label>
+        <input id="cap" type="number" min="60" max="720" step="30" value="480">
+      </div>
+      <div>
+        <label>出发日期</label>
+        <input id="start_date" type="date">
+      </div>
+    </div>
+    <fieldset>
+      <legend>偏好类目（提高对应景点被选中的权重）</legend>
+      <div class="chips" id="prefs"></div>
+    </fieldset>
+    <fieldset>
+      <legend>必去点（硬约束，求解器优先保证覆盖）</legend>
+      <div class="pois" id="pois"></div>
+    </fieldset>
+    <button class="primary" id="go">生成行程</button>
+  </div>
+
+  <div id="result"></div>
+
+  <footer>
+    API 文档 <a id="docs" href="#">/docs</a> ｜ 探针 <a id="hz" href="#">/healthz</a> ｜
+    数据来源：高德导出 + 人工校对（见 README）
+  </footer>
+</div>
+
+<script>
+"use strict";
+// API 地址：默认同源（nginx 反代 /api，免跨源）；?api= 可覆盖（本地裸 uvicorn 调试）
+const API_BASE = new URLSearchParams(location.search).get("api") || "";
+document.getElementById("docs").href = API_BASE + "/docs";
+document.getElementById("hz").href = API_BASE + "/healthz";
+document.getElementById("start_date").value = new Date().toISOString().slice(0, 10);
+
+const CATS = ["history", "food", "nature", "modern", "shopping", "museum", "religion", "landmark"];
+const CAT_NAMES = { history: "历史", food: "美食", nature: "自然", modern: "现代",
+                    shopping: "购物", museum: "博物馆", religion: "宗教", landmark: "地标" };
+const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+
+function chip(text, value, groupName) {
+  const el = document.createElement("label");
+  el.className = "chip";
+  el.innerHTML = `<input type="checkbox" value="${value}" name="${groupName}">${text}`;
+  el.querySelector("input").addEventListener("change", () => el.classList.toggle("on"));
+  return el;
+}
+
+// 偏好 chips
+const prefsEl = document.getElementById("prefs");
+CATS.forEach(c => prefsEl.appendChild(chip(`${CAT_NAMES[c]} (${c})`, c, "pref")));
+
+// 必去点列表：加载 /api/pois
+fetch(API_BASE + "/api/pois").then(r => r.json()).then(pois => {
+  const el = document.getElementById("pois");
+  pois.forEach(p => {
+    const c = chip(
+      `${p.name} <span class="tag">${CAT_NAMES[p.category] || p.category}</span>` +
+      (p.ticket ? `<span class="tag">¥${p.ticket}</span>` : `<span class="tag free">免费</span>`),
+      p.id, "must");
+    if (p.id === "forbidden_city") {  // 默认必去：故宫（§10 示例）
+      c.querySelector("input").checked = true;
+      c.classList.add("on");
+    }
+    el.appendChild(c);
+  });
+}).catch(() => {
+  document.getElementById("pois").innerHTML =
+    '<p class="empty">POI 目录加载失败（API 未启动？）</p>';
+});
+
+function picked(groupName) {
+  return [...document.querySelectorAll(`input[name=${groupName}]:checked`)].map(i => i.value);
+}
+
+const fmt = m => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+
+document.getElementById("go").addEventListener("click", async () => {
+  const btn = document.getElementById("go");
+  const out = document.getElementById("result");
+  btn.disabled = true; btn.textContent = "求解中…";
+  out.innerHTML = '<p class="empty">OR-Tools 求解 + 独立校验中，约 1–3 秒…</p>';
+  const payload = {
+    city: "beijing",
+    days: +document.getElementById("days").value,
+    hotel: "wangfujing",
+    budget: +document.getElementById("budget").value,
+    daily_minutes_cap: +document.getElementById("cap").value,
+    must_visit: picked("must"),
+    preferences: picked("pref"),
+    session_id: "web",
+    start_date: document.getElementById("start_date").value || undefined,
+  };
+  try {
+    const r = await fetch(API_BASE + "/api/plan", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = await r.json();
+    if (!r.ok) {
+      out.innerHTML = `<div class="banner bad">请求被拒绝（${r.status}）</div>` +
+        `<pre>${JSON.stringify(body.detail ?? body, null, 2)}</pre>`;
+      return;
+    }
+    render(body, payload);
+  } catch (e) {
+    out.innerHTML = `<div class="banner bad">请求失败：${e}</div>`;
+  } finally {
+    btn.disabled = false; btn.textContent = "生成行程";
+  }
+});
+
+function render(b, req) {
+  const out = document.getElementById("result");
+  const feasible = b.status === "feasible";
+  const v = b.verification ?? { violations: [], recomputed_budget: 0 };
+  let html = feasible
+    ? `<div class="banner ok">✓ 可行 —— 独立校验器复核通过：时间窗冲突 0、预算 ${v.recomputed_budget} 元 ≤ ${req.budget} 元</div>`
+    : `<div class="banner bad">✗ 不可行（不硬凑行程，原因如下）</div><ul class="reasons">` +
+      (b.infeasible_reasons ?? []).map(x => `<li>${x}</li>`).join("") + "</ul>";
+
+  html += `<p class="meta">trace_id <code>${b.trace_id}</code> ` +
+    `｜ 求解 ${b.solver.wall_ms}ms（目标 ${b.solver.objective}，阶段 ${b.solver.phases.join("→")}）` +
+    `｜ 端到端 ${b.cost.latency_ms}ms ｜ ` +
+    `<a href="${API_BASE}/api/runs/${b.trace_id}" target="_blank">查看 spans →</a></p>`;
+
+  if (feasible) {
+    b.days.forEach(d => {
+      const wd = WEEKDAYS[new Date(d.date + "T00:00:00").getDay()];
+      html += `<div class="card day"><h3>第 ${d.date_index + 1} 天 · ${d.date} ${wd}` +
+        `<small>${d.depart} 出发 → ${d.return} 回酒店 · 在外 ${d.away_minutes} 分钟</small></h3>`;
+      if (!d.stops.length) {
+        html += '<p class="empty">本日自由活动（未安排景点）</p></div>';
+        return;
+      }
+      html += "<table><tr><th>时间</th><th>景点</th><th>等候</th><th>门票</th></tr>";
+      d.stops.forEach(s => {
+        html += `<tr><td class="time">${s.arrive} – ${s.leave}</td>` +
+          `<td>${s.name}<span class="tag">${CAT_NAMES[s.category] || s.category}</span></td>` +
+          `<td>${s.wait_min ? `<span class="wait">等 ${s.wait_min} 分钟</span>` : "—"}</td>` +
+          `<td>${s.ticket ? "¥" + s.ticket : '<span class="free">免费</span>'}</td></tr>`;
+      });
+      html += "</table></div>";
+    });
+    html += `<p class="meta">重算总花费 ${v.recomputed_budget} 元（门票 + 出租车启发式车费）` +
+      `｜ 约束来源 ${b.applied_constraints.source} · 第 ${b.applied_constraints.turn} 轮</p>`;
+  }
+  out.innerHTML = html;
+}
+</script>
 </body>
 </html>
