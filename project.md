@@ -8,7 +8,7 @@
 | 版本 | v0.3.0 |
 | 最后更新 | 2026-11-17 |
 | 目标读者 | 项目开发者、面试考官、后续维护者 |
-| 关联文件 | `architecture.svg`（总体架构图）、`TASKS.md`（阶段 0–1 任务清单） |
+| 关联文件 | `architecture.svg`（总体架构图）、`TASKS.md`（阶段 0–2 任务清单） |
 | 技术栈 | Python 3.11+ / FastAPI / SQLite / OR-Tools / OpenAI-compatible LLM / 静态前端 / Docker Compose |
 
 > **数据诚实约定**：文中所有标记为 `TBD` 的指标均为待回填占位。必须由评测脚本在对应阶段真实跑出后写入，未实现前不得填写数字。评审与面试时应能出示评测报告原文和 commit 记录。
@@ -447,6 +447,9 @@ CREATE TABLE eval_results (
 | `GET` | `/api/eval/reports` | 列出历史报告与指标趋势 |
 | `GET` / `POST` | `/api/registry/capabilities` | 查询 / 注册能力卡片 |
 | `GET` | `/api/registry/health` | 各能力心跳状态 |
+| `GET` | `/api/memory/events?session_id=&user_id=&scope=` | Ledger 事件回放（追加序，可追溯 supersedes 链） |
+| `GET` | `/api/memory/views?session_id=&user_id=` | scope 链当前活跃 hard_constraints 视图（Memory.read 同源） |
+| `POST` | `/api/memory/rebuild` | 重放全量 Ledger 重建 Views，返回一致性结果 |
 | `GET` | `/healthz` / `/readyz` | 存活与就绪探针（含版本与 git sha） |
 | `GET` | `/.well-known/agent.json` | 只读 Agent Card（A2A 风格自描述，discovery-only，见 §7.7） |
 
@@ -579,7 +582,7 @@ python -m app.eval.runner --baseline
 | **前置 边界确认** | §0 边界确认记录（B1–B13）、ADR-006/007、`TASKS.md` | 13 项实施边界逐条落定并回写文档 | ✅ 完成（2026-11-17） |
 | **0 资源就绪** | API key、POI 数据集、Docker Compose、公开 demo、README 架构图 | `docker compose up` 可访问；`/healthz` 返回版本 | 🟡 2026-11-17 基本完成：Windows 本地 compose 验收通过（/healthz 200 含 git_sha、pytest 绿、CI test+lint 绿、pois.json 23 个无缺字段）；VPS 部署验证待做（0.7 尾项） |
 | **1 最小可跑** | 单城 3 日行程、Routing 求解、独立校验器、行程前端 | 40 条用例中时间窗冲突为 0 | ✅ 完成（2026-11-17）：`POST /api/plan` 全链路（两阶段 VRPTW 求解 + 独立校验器 + runs/spans 贯穿 + 前端行程卡 + nginx 同源反代）；10 条种子用例（含 2 hidden）时间窗冲突 0 / 预算违规 0 / 必去覆盖全过，属性测试 120 组随机样本通过，pytest 37 绿 + ruff clean + compose 冒烟通过（40 条全集随阶段 3 补齐，见 TASKS.md） |
-| **2 记忆层** | Ledger / Views / Policy、多轮一致性演示 | 第 6 轮约束回显正确，可回放 Ledger | 待开始 |
+| **2 记忆层** | Ledger / Views / Policy、多轮一致性演示 | 第 6 轮约束回显正确，可回放 Ledger | ✅ 完成（2026-11-17）：memory_events/memory_views 落地（追加写 + supersedes 归档 + 重放重建）；Memory.read scope 链注入（session→user→global、衰减只影响排序不丢硬约束）；Resolver 白名单 function calling（三工具 + 护栏 + 规则模板降级）；`POST /api/chat` SSE 六段 spans；前端对话视图（用户切换/约束来源徽标）；六轮演进召回 / 跨会话注入 / 用户隔离 / rebuild 一致全过（pytest 106 绿）；任务明细见 `TASKS.md` 阶段 2 |
 | **3 评测观测** | 评测集、Trace Store、看板、CI 回归报告 | 产出改动前后指标对比图 | 待开始 |
 | **4 平台化** | Registry、健康检查、灰度回滚、故障注入测试、只读 Agent Card 导出 | 回滚无需重启；降级路径可用；卡片与 `/api/plan` schema 一致 | 待开始 |
 

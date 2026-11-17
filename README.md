@@ -4,7 +4,7 @@
 
 - 设计文档：[project.md](project.md)（含 ADR 决策记录、API 契约、数据模型）
 - 总体架构：[architecture.svg](architecture.svg)
-- 任务清单：[TASKS.md](TASKS.md)（阶段 0–1）
+- 任务清单：[TASKS.md](TASKS.md)（阶段 0–2）
 
 ## 快速上手
 
@@ -20,7 +20,7 @@ GIT_SHA=$(git rev-parse --short HEAD) docker compose up --build
 ```bash
 uv venv --python 3.11 .venv
 uv pip install --python .venv -e ".[dev]"        # 或 pip install -e ".[dev]"
-.venv/Scripts/alembic upgrade head               # 建 runs/spans 表
+.venv/Scripts/alembic upgrade head               # 建 runs/spans + memory_events/memory_views 表
 .venv/Scripts/python.exe -m pytest -q
 .venv/Scripts/python.exe -m uvicorn app.main:app --port 8000
 ```
@@ -44,6 +44,18 @@ curl -X POST http://localhost:8000/api/plan -H "Content-Type: application/json" 
 .venv/Scripts/python.exe scripts/check_plans.py --include-hidden
 ```
 
+多轮对话与记忆回放（阶段 2）：
+
+```bash
+# SSE 流式对话（需 LLM_API_KEY；无 key 时自动降级规则模板解析）：
+curl -N -X POST http://localhost:8000/api/chat -H "Content-Type: application/json"   -d '{"session_id":"s-1","user_id":"u-alice","message":"预算8000玩2天，必去故宫"}'
+# 下一轮只改天数，预算来自记忆注入（applied_constraints.source = memory_views#N）：
+curl -N -X POST http://localhost:8000/api/chat -H "Content-Type: application/json"   -d '{"session_id":"s-1","user_id":"u-alice","message":"改成玩3天"}'
+# 记忆回放与重建（§13「可回放 Ledger」验收口径）：
+curl "http://localhost:8000/api/memory/events?session_id=s-1"
+curl -X POST http://localhost:8000/api/memory/rebuild    # -> consistent: true
+```
+
 ## 数据来源与导出日期（§14 授权风险缓解）
 
 | 数据 | 来源 | 导出/校对日期 | 说明 |
@@ -56,13 +68,14 @@ curl -X POST http://localhost:8000/api/plan -H "Content-Type: application/json" 
 ## 项目结构（§11.1）
 
 ```
-app/            FastAPI 入口 / 配置 / api（plan·runs·pois）/ db（repository·runs）/ solver（VRPTW）/ verifier（独立校验）
-                （runtime·memory·registry·eval 随阶段 2–4 落地）
+app/            FastAPI 入口 / 配置 / api（plan·chat·memory·runs·pois）/ db（repository·runs·models）
+                memory（Ledger·Policy·Views·Memory.read）/ llm（适配器·白名单工具）/ runtime（Resolver·Responder·pipeline）
+                solver（VRPTW）/ verifier（独立校验）；registry·eval 随阶段 3–4 落地
 alembic/        schema 迁移（禁止手工改表，§11.4）
 scripts/        export_pois / build_matrix（一次性导出）+ check_plans（批量断言，阶段 3 eval runner 前身）
-web/            静态前端（无构建；行程视图已落地，Trace / 评测看板随阶段 3）+ nginx.conf（/api 同源反代）
+web/            静态前端（无构建；行程对话 + 手动规划两视图已落地，Trace / 评测看板随阶段 3）+ nginx.conf（/api 同源反代）
 data/           pois.json / matrix.json / eval_cases.jsonl / tripagent.db（库文件不入库）
-tests/          pytest（契约 / 求解 / 校验 / 属性测试等 37 项）
+tests/          pytest（契约 / 求解 / 校验 / 属性 / 记忆一致性 / 护栏等 106 项）
 ```
 
 ## 环境变量
@@ -75,4 +88,4 @@ GitHub Actions（[ci.yml](.github/workflows/ci.yml)）：`lint`（ruff）+ `test
 
 ## 状态与路线图
 
-当前：**阶段 1 · 最小可跑行程已完成**（2026-11-17，详见 [TASKS.md](TASKS.md)）——`POST /api/plan` 全链路可用：OR-Tools VRPTW 两阶段求解 + 独立校验器零冲突 + 前端逐日行程卡。后续：阶段 2 记忆层（Ledger/Views/Policy + 多轮对话）→ 3 评测观测（40 条全集 + Trace 看板）→ 4 平台化（Registry 灰度回滚）。
+当前：**阶段 2 · 记忆层已完成**（2026-11-17，详见 [TASKS.md](TASKS.md)）——Ledger/Views/Policy 三件套（ADR-003）+ Resolver 白名单 function calling（ADR-008/B14）+ `POST /api/chat` SSE 多轮对话（B12，每轮全量重规划）+ 跨会话用户切换（B9）：六轮演进早期约束不滑点、改预算 supersede 归档可回放、rebuild 重放一致、用户隔离。后续：阶段 3 评测观测（40 条全集 + 双基线 + Trace 看板）→ 4 平台化（Registry 灰度回滚 + Agent Card）。
