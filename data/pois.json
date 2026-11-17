@@ -23,12 +23,7 @@
       "score": 4.8,
       "closed_weekdays": [],
       "note": "需预约；升旗时间随日期变化",
-      "needs_review": [
-        "hours",
-        "ticket",
-        "duration",
-        "score"
-      ],
+      "needs_review": [],
       "export_date": "2026-11-17",
       "source": "amap:place_text_v3"
     },
@@ -49,12 +44,7 @@
         0
       ],
       "note": "周一闭馆；旺季 16:10 停止入场",
-      "needs_review": [
-        "hours",
-        "ticket",
-        "duration",
-        "score"
-      ],
+      "needs_review": [],
       "export_date": "2026-11-17",
       "source": "amap:place_text_v3"
     },
@@ -73,12 +63,7 @@
       "score": 4.7,
       "closed_weekdays": [],
       "note": "万春亭俯瞰故宫全景",
-      "needs_review": [
-        "hours",
-        "ticket",
-        "duration",
-        "score"
-      ],
+      "needs_review": [],
       "export_date": "2026-11-17",
       "source": "amap:place_text_v3"
     },
@@ -97,12 +82,7 @@
       "score": 4.7,
       "closed_weekdays": [],
       "note": "",
-      "needs_review": [
-        "hours",
-        "ticket",
-        "duration",
-        "score"
-      ],
+      "needs_review": [],
       "export_date": "2026-11-17",
       "source": "amap:place_text_v3"
     },
@@ -121,12 +101,7 @@
       "score": 4.8,
       "closed_weekdays": [],
       "note": "联票（含祈年殿）另计",
-      "needs_review": [
-        "hours",
-        "ticket",
-        "duration",
-        "score"
-      ],
+      "needs_review": [],
       "export_date": "2026-11-17",
       "source": "amap:place_text_v3"
     },
@@ -145,12 +120,7 @@
       "score": 4.7,
       "closed_weekdays": [],
       "note": "",
-      "needs_review": [
-        "hours",
-        "ticket",
-        "duration",
-        "score"
-      ],
+      "needs_review": [],
       "export_date": "2026-11-17",
       "source": "amap:place_text_v3"
     },
@@ -171,12 +141,7 @@
         0
       ],
       "note": "周一闭馆",
-      "needs_review": [
-        "hours",
-        "ticket",
-        "duration",
-        "score"
-      ],
+      "needs_review": [],
       "export_date": "2026-11-17",
       "source": "amap:place_text_v3"
     },
@@ -195,12 +160,7 @@
       "score": 4.4,
       "closed_weekdays": [],
       "note": "胡同商业街",
-      "needs_review": [
-        "hours",
-        "ticket",
-        "duration",
-        "score"
-      ],
+      "needs_review": [],
       "export_date": "2026-11-17",
       "source": "amap:place_text_v3"
     },
@@ -219,12 +179,7 @@
       "score": 4.6,
       "closed_weekdays": [],
       "note": "全天开放；前海/后海/酒吧街",
-      "needs_review": [
-        "hours",
-        "ticket",
-        "duration",
-        "score"
-      ],
+      "needs_review": [],
       "export_date": "2026-11-17",
       "source": "amap:place_text_v3"
     },
@@ -245,12 +200,7 @@
         0
       ],
       "note": "周一闭馆；免费需预约",
-      "needs_review": [
-        "hours",
-        "ticket",
-        "duration",
-        "score"
-      ],
+      "needs_review": [],
       "export_date": "2026-11-17",
       "source": "amap:place_text_v3"
     },
@@ -269,12 +219,7 @@
       "score": 4.5,
       "closed_weekdays": [],
       "note": "示例请求中的酒店锚点区域",
-      "needs_review": [
-        "hours",
-        "ticket",
-        "duration",
-        "score"
-      ],
+      "needs_review": [],
       "export_date": "2026-11-17",
       "source": "amap:place_text_v3"
     },
@@ -293,12 +238,7 @@
       "score": 4.5,
       "closed_weekdays": [],
       "note": "大栅栏",
-      "needs_review": [
-        "hours",
-        "ticket",
-        "duration",
-        "score"
-      ],
+      "needs_review": [],
       "export_date": "2026-11-17",
       "source": "amap:place_text_v3"
     },
@@ -317,12 +257,7 @@
       "score": 4.5,
       "closed_weekdays": [],
       "note": "夜间餐饮一条街；实际营业至凌晨（简化为当日窗口）",
-      "needs_review": [
-        "hours",
-        "ticket",
-        "duration",
-        "score"
-      ],
+      "needs_review": [],
       "export_date": "2026-11-17",
       "source": "amap:place_text_v3"
     },
@@ -341,12 +276,7 @@
       "score": 4.9,
       "closed_weekdays": [],
       "note": "旺季 6:00-20:00",
-      "needs_review": [
-        "hours",
-        "ticket",
-        "duration",
-        "score"
-      ],
+      "needs_review": [],
       "export_date": "2026-11-17",
       "source": "amap:place_text_v3"
     },
@@ -365,12 +295,7 @@
       "score": 4.7,
       "closed_weekdays": [],
       "note": "",
-      "needs_review": [
-        "hours",
-        "ticket",
-        "duration",
-        "score"
-      ],
+      "needs_review": [],
       "export_date": "2026-11-17",
       "source": "amap:place_text_v3"
     },
@@ -389,12 +314,7 @@
       "score": 4.8,
       "closed_weekdays": [],
       "note": "远郊（延庆），往返车程约 3h",
-      "needs_review": [
-        "hours",
-        "ticket",
-        "duration",
-        "score"
-      ],
+      "needs_review": [],
       "export_date": "2026-11-17",
       "source": "amap:place_text_v3"
     },
@@ -413,12 +333,7 @@
       "score": 4.8,
       "closed_weekdays": [],
       "note": "远郊（怀柔），往返车程约 3h",
-      "needs_review": [
-        "hours",
-        "ticket",
-        "duration",
-        "score"
-      ],
+      "needs_review": [],
       "export_date": "2026-11-17",
       "source": "amap:place_text_v3"
     },
@@ -437,12 +352,7 @@
       "score": 4.6,
       "closed_weekdays": [],
       "note": "秋季红叶季人流极大",
-      "needs_review": [
-        "hours",
-        "ticket",
-        "duration",
-        "score"
-      ],
+      "needs_review": [],
       "export_date": "2026-11-17",
       "source": "amap:place_text_v3"
     },
@@ -461,12 +371,7 @@
       "score": 4.5,
       "closed_weekdays": [],
       "note": "园区全天开放，画廊约 10:00-18:00",
-      "needs_review": [
-        "hours",
-        "ticket",
-        "duration",
-        "score"
-      ],
+      "needs_review": [],
       "export_date": "2026-11-17",
       "source": "amap:place_text_v3"
     },
@@ -485,12 +390,7 @@
       "score": 4.7,
       "closed_weekdays": [],
       "note": "鸟巢/水立方外观免费",
-      "needs_review": [
-        "hours",
-        "ticket",
-        "duration",
-        "score"
-      ],
+      "needs_review": [],
       "export_date": "2026-11-17",
       "source": "amap:place_text_v3"
     },
@@ -509,12 +409,7 @@
       "score": 4.5,
       "closed_weekdays": [],
       "note": "",
-      "needs_review": [
-        "hours",
-        "ticket",
-        "duration",
-        "score"
-      ],
+      "needs_review": [],
       "export_date": "2026-11-17",
       "source": "amap:place_text_v3"
     },
@@ -535,12 +430,7 @@
         0
       ],
       "note": "周一闭馆；免费需预约",
-      "needs_review": [
-        "hours",
-        "ticket",
-        "duration",
-        "score"
-      ],
+      "needs_review": [],
       "export_date": "2026-11-17",
       "source": "amap:place_text_v3"
     },
@@ -559,14 +449,14 @@
       "score": 4.5,
       "closed_weekdays": [],
       "note": "熊猫馆另计",
-      "needs_review": [
-        "hours",
-        "ticket",
-        "duration",
-        "score"
-      ],
+      "needs_review": [],
       "export_date": "2026-11-17",
       "source": "amap:place_text_v3"
     }
-  ]
+  ],
+  "manual_review": {
+    "completed": true,
+    "date": "2026-11-17",
+    "by": "author"
+  }
 }
