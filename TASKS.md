@@ -22,17 +22,17 @@
 
 **目标**：`POST /api/plan` 输入结构化约束 → OR-Tools 求解 → 独立校验器零冲突 → 前端渲染行程卡。这是 B2 定下的首个可演示里程碑。
 
-- [ ] **1.1 数据访问层**：POI / 矩阵加载与内存缓存（`app/db/repository`），只读、带 schema 校验
-- [ ] **1.2 Solver v1**：OR-Tools Routing VRPTW 建模（§8）——m 天 = m 辆车、时间窗 `CumulVar` 区间、预算维度、`AddDisjunction` drop penalty、酒店起终点、`time_limit`
-- [ ] **1.3 独立 Verifier**：从路线逐段重算时间线、核对闭馆、重算门票+交通费、查重复访问，输出 `violations[]`；**不复用求解器代码路径**（ADR-001）
-- [ ] **1.4 API 契约**：`POST /api/plan` + `PlanRequest` / `PlanResponse` pydantic schema（§10 示例为准）+ trace_id 贯穿 `runs` / `spans`
-- [ ] **1.5 不可行处理**：求解无解 / 校验失败时返回明确 `infeasible_reasons`，不硬凑行程
-- [ ] **1.6 前端行程视图**：静态页（无构建，B 端三个视图中的第一个）调 `/api/plan`，渲染逐日行程卡（arrive / leave / wait_min / 门票）
-- [ ] **1.7 结构化检查脚本**：对批量 plan 断言时间窗冲突 = 0、预算不超、必去点覆盖——阶段 3 eval runner 的前身
-- [ ] **1.8 属性测试**：随机生成 POI × 约束组合，断言"校验器通过 ⇒ 无硬约束违反"（§15）
-- [ ] **1.9 评测种子用例**：10 条结构化 `/api/plan` 用例入库（40 条全集阶段 3 补齐，含 20% 隐藏）
+- [x] **1.1 数据访问层**：POI / 矩阵加载与内存缓存（`app/db/repository`），只读、带 schema 校验 ✅ 2026-11-17 pydantic 严格校验（时间窗含停留可行性、closed_weekdays 0–6、矩阵方形/对角零/非对角正）+ POI↔矩阵节点序一致性校验 + `lru_cache` 单例；tests 8 项
+- [x] **1.2 Solver v1**：OR-Tools Routing VRPTW 建模（§8） ✅ 2026-11-17 时间维度按**绝对时刻**建模（CumulVar SetRange(open, close−duration)，T_day 用逐车 span 约束而非 capacity——绝对时刻下 capacity 会错切）；预算维度角制取整（floor 只收紧）+ 跨天总量 ≤ B；`AddDisjunction` penalty=score×W（偏好类目 ×1.5）；周闭馆用 `VehicleVar.RemoveValue`；**两阶段求解**（完整目标 → 必去救援（可选点 penalty=0）→ ReadAssignmentFromRoutes 回灌 warm-start），修复 PATH_CHEAPEST_ARC 在 cap 挤压下丢必去点的搜索缺陷；tests 8 项
+- [x] **1.3 独立 Verifier**：从路线逐段重算时间线、核对闭馆、重算门票+交通费、查重复访问，输出 `violations[]`；**不复用求解器代码路径**（ADR-001） ✅ 2026-11-17 `app/verifier/verify.py` 不 import 任何 solver 内容，输入为纯 dataclass 声明；9 类 violation（timeline_mismatch / window_closed / closed_weekday / duplicate_visit / daily_cap_exceeded / budget_exceeded / must_visit_missed / unknown_poi / invalid_day_index）；故意构造违反的 tests 9 项逐类命中 + 真实求解结果端到端零冲突
+- [x] **1.4 API 契约**：`POST /api/plan` + `PlanRequest` / `PlanResponse` pydantic schema（§10 示例为准）+ trace_id 贯穿 `runs` / `spans` ✅ 2026-11-17 §10 请求/响应示例逐字段对齐（applied_constraints.source 阶段 1 如实为 "request"）；solver.solve / verifier.check 两个 span 落库；`GET /api/runs/{trace_id}` 可查完整 spans；另加只读 `GET /api/pois` 供前端目录；契约 tests 9 项
+- [x] **1.5 不可行处理**：求解无解 / 校验失败时返回明确 `infeasible_reasons`，不硬凑行程 ✅ 2026-11-17 三类原因：`solver_no_solution` / `must_visit_not_covered` / `verification_failed[type]`；infeasible 时 days 恒为空（测试断言）
+- [x] **1.6 前端行程视图**：静态页（无构建，B 端三个视图中的第一个）调 `/api/plan`，渲染逐日行程卡（arrive / leave / wait_min / 门票） ✅ 2026-11-17 约束表单（偏好/必去点 chips 从 `/api/pois` 动态加载）→ 逐日行程卡 + 校验横幅 + trace_id/spans 链接；web 容器改为 nginx 同源反代 `/api`（ADR-005，免 CORS）；浏览器实测可行（北京 3 日卡）与不可行（原因列表）两分支
+- [x] **1.7 结构化检查脚本**：对批量 plan 断言时间窗冲突 = 0、预算不超、必去点覆盖——阶段 3 eval runner 的前身 ✅ 2026-11-17 `scripts/check_plans.py`（进程内 TestClient + 临时库；--include-hidden / --json）；10/10 全过
+- [x] **1.8 属性测试**：随机生成 POI × 约束组合，断言"校验器通过 ⇒ 无硬约束违反"（§15） ✅ 2026-11-17 固定种子 120 组随机合成世界（非对称矩阵/随机闭馆/紧预算）：①求解成功且必去覆盖 ⇒ 校验器零冲突 ②校验器通过 ⇒ 测试内第三方 oracle 重算零违反 ③不可行 ⇒ 必有明确证据；实测 74 组走可行+双实现咬合路径、46 组走不可行证据路径
+- [x] **1.9 评测种子用例**：10 条结构化 `/api/plan` 用例入库（40 条全集阶段 3 补齐，含 20% 隐藏） ✅ 2026-11-17 `data/eval_cases.jsonl`：8 公开 + 2 hidden（4 日远郊多必去 / 预算 1 元），覆盖可行 6 / 不可行 4
 
-**验收**：10 条种子用例时间窗冲突 = 0、预算违规 = 0、必去点覆盖断言全过；前端可视化一份北京 3 日行程；`GET /api/runs/{trace_id}` 可查到完整 spans；属性测试 ≥ 100 组随机样本通过。
+**验收**：10 条种子用例时间窗冲突 = 0、预算违规 = 0、必去点覆盖断言全过；前端可视化一份北京 3 日行程；`GET /api/runs/{trace_id}` 可查到完整 spans；属性测试 ≥ 100 组随机样本通过。　✅ 2026-11-17 全过：种子 10/10（含 hidden）；浏览器实测 3 日行程卡渲染（含周末闭馆规避）；runs/spans 含 solver+verifier 完整可查（compose 经 nginx 反代实测）；属性测试 120 组；pytest 37 passed + ruff clean；`docker compose up` 冒烟通过（/healthz、web 3000、/api/plan 均正常）
 
 ---
 

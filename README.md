@@ -32,6 +32,18 @@ uv pip install --python .venv -e ".[dev]"        # 或 pip install -e ".[dev]"
 .venv/Scripts/python.exe scripts/build_matrix.py   # n×n 驾车耗时矩阵 -> data/matrix.json
 ```
 
+行程规划与批量断言（阶段 1）：
+
+```bash
+# 结构化约束直接求解（跳过意图解析，便于评测）：
+curl -X POST http://localhost:8000/api/plan -H "Content-Type: application/json" -d '{
+  "city": "beijing", "days": 3, "hotel": "wangfujing", "budget": 10000,
+  "daily_minutes_cap": 480, "must_visit": ["forbidden_city"],
+  "preferences": ["history", "food"], "session_id": "s-001", "start_date": "2026-11-18"}'
+# 种子用例批量断言（时间窗冲突=0 / 预算不超 / 必去覆盖）：
+.venv/Scripts/python.exe scripts/check_plans.py --include-hidden
+```
+
 ## 数据来源与导出日期（§14 授权风险缓解）
 
 | 数据 | 来源 | 导出/校对日期 | 说明 |
@@ -44,12 +56,13 @@ uv pip install --python .venv -e ".[dev]"        # 或 pip install -e ".[dev]"
 ## 项目结构（§11.1）
 
 ```
-app/            FastAPI 入口 / 配置 / 路由 / db /（runtime·memory·registry·solver·verifier·eval 随阶段 1–4 落地）
+app/            FastAPI 入口 / 配置 / api（plan·runs·pois）/ db（repository·runs）/ solver（VRPTW）/ verifier（独立校验）
+                （runtime·memory·registry·eval 随阶段 2–4 落地）
 alembic/        schema 迁移（禁止手工改表，§11.4）
-scripts/        一次性数据导出脚本（export_pois / build_matrix）
-web/            静态前端（无构建；行程 / Trace / 评测三视图随阶段落地）
-data/           pois.json / matrix.json / tripagent.db（库文件不入库）
-tests/          pytest（探针契约测试等）
+scripts/        export_pois / build_matrix（一次性导出）+ check_plans（批量断言，阶段 3 eval runner 前身）
+web/            静态前端（无构建；行程视图已落地，Trace / 评测看板随阶段 3）+ nginx.conf（/api 同源反代）
+data/           pois.json / matrix.json / eval_cases.jsonl / tripagent.db（库文件不入库）
+tests/          pytest（契约 / 求解 / 校验 / 属性测试等 37 项）
 ```
 
 ## 环境变量
@@ -62,4 +75,4 @@ GitHub Actions（[ci.yml](.github/workflows/ci.yml)）：`lint`（ruff）+ `test
 
 ## 状态与路线图
 
-当前：**阶段 0 · 资源就绪**（详见 [TASKS.md](TASKS.md)）。后续：阶段 1 最小可跑行程（OR-Tools VRPTW + 独立校验器）→ 2 记忆层 → 3 评测观测 → 4 平台化。
+当前：**阶段 1 · 最小可跑行程已完成**（2026-11-17，详见 [TASKS.md](TASKS.md)）——`POST /api/plan` 全链路可用：OR-Tools VRPTW 两阶段求解 + 独立校验器零冲突 + 前端逐日行程卡。后续：阶段 2 记忆层（Ledger/Views/Policy + 多轮对话）→ 3 评测观测（40 条全集 + Trace 看板）→ 4 平台化（Registry 灰度回滚）。
