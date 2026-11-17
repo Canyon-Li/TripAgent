@@ -97,6 +97,8 @@ def grade_plan_case(case: PlanCase, body: dict | None, http_error: str | None = 
     r.set(M_HARD, r.passed, 1.0 if r.passed else 0.0)
     r.set(M_TIMEWIN, tw_violations == a.time_window_violations, float(tw_violations))
     r.set(M_BUDGET, budget_ok, 1.0 if budget_ok else 0.0)
+    r.set(M_P95, True, r.latency_ms)  # 记录型（§12 不阻断）
+    r.set(M_COST, True, float(r.token_in + r.token_out))
     r.set(M_FINAL, r.passed, 1.0 if r.passed else 0.0)
     return r
 
@@ -214,6 +216,8 @@ def grade_chat_case(
     r.set(M_TIMEWIN, tw_violations == a.time_window_violations, float(tw_violations))
     r.set(M_BUDGET, not any("预算超支" in f for f in r.failures),
           0.0 if any("预算超支" in f for f in r.failures) else 1.0)
+    r.set(M_P95, True, r.latency_ms)  # 记录型：chat 为各轮耗时和（真 P95 见报告聚合）
+    r.set(M_COST, True, float(r.token_in + r.token_out))
     r.set(M_FINAL, r.passed, 1.0 if r.passed else 0.0)
     return r
 

@@ -1,4 +1,5 @@
-# CI（TASKS 0.8 / B8）：pytest + lint，PR 必过（main 分支保护必需检查 test / lint）
+# CI（TASKS 0.8 / 3.8 / B8）：pytest + lint + eval 回归，PR 必过
+# （main 分支保护必需检查 test / lint / eval）
 name: ci
 
 on:
@@ -36,3 +37,30 @@ jobs:
         run: alembic upgrade head
       - name: Run tests
         run: pytest -q
+
+  # TASKS 3.8 / §12 验收规则：公开集 current+B（FakeLLM 确定性）对比 reports/baseline.json——
+  # 硬约束类指标任一退化或 final_pass_rate 降 >2pp 即失败；真实 LLM 评测不进 CI（成本/抖动），
+  # 由本地验收运行产出报告（§14 防过拟合同口径）。
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install project
+        run: pip install -e ".[dev]"
+      - name: Apply migrations
+        run: alembic upgrade head
+      - name: Eval regression (public set, deterministic)
+        run: python -m app.eval.runner --ci
+      - name: Upload eval report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: reports/
+          if-no-files-found: ignore

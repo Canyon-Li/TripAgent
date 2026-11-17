@@ -212,7 +212,7 @@ def run_eval(
     report_path = report.write_report(
         meta, columns, aggregates,
         git_sha=settings.git_sha,
-        model=(get_llm().model if use_real else "scripted-fake"),
+        model=(settings.llm_model if use_real else "scripted-fake"),
         real_llm=use_real,
         include_hidden=include_hidden,
     )

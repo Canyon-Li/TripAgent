@@ -102,6 +102,19 @@
     .composer { display: flex; gap: 10px; margin-top: 16px; }
     .composer input { flex: 1; }
     .hint { color: var(--sub); font-size: .78rem; margin-top: 8px; }
+    /* ---- Trace 瀑布图 / 评测看板（阶段 3）---- */
+    .wf { margin-top: 8px; }
+    .wf-row { display: grid; grid-template-columns: 110px 1fr 74px; align-items: center;
+              gap: 8px; padding: 3px 0; }
+    .wf-row .nm { font-size: .8rem; color: var(--sub); text-align: right; }
+    .wf-track { position: relative; height: 18px; background: #f0f2f8; border-radius: 4px; }
+    .wf-bar { position: absolute; top: 2px; bottom: 2px; background: var(--accent);
+              border-radius: 3px; min-width: 3px; }
+    .wf-bar.bad { background: var(--bad); }
+    .wf-row .ms { font-size: .74rem; color: var(--sub); font-variant-numeric: tabular-nums; }
+    .wf-meta { font-size: .72rem; color: var(--sub); margin: 2px 0 8px 118px; word-break: break-all; }
+    #dash_chart svg { width: 100%; height: auto; }
+    #dash_run_out { margin-top: 10px; }
   </style>
 </head>
 <body>
@@ -111,10 +124,10 @@
     <p>结构化约束 → OR-Tools 求解 → 独立校验器复核；记忆层贯穿多轮对话（project.md §7–8 / ADR-001/003）</p>
   </header>
   <div class="views" id="views">
-    <span class="active" data-view="chat">行程对话 · 阶段 2</span>
-    <span data-view="plan">手动规划 · 阶段 1</span>
-    <span>Trace 回放 · 阶段 3</span>
-    <span>评测看板 · 阶段 3</span>
+    <span class="active" data-view="chat">行程对话</span>
+    <span data-view="plan">手动规划</span>
+    <span data-view="trace">Trace 回放</span>
+    <span data-view="dash">评测看板</span>
   </div>
 
   <!-- ============ 行程对话（阶段 2） ============ -->
@@ -187,6 +200,41 @@
     <div id="result"></div>
   </section>
 
+  <!-- ============ Trace 回放（阶段 3） ============ -->
+  <section id="view-trace" hidden>
+    <div class="card">
+      <label>trace_id（行程卡里点「查看 spans →」，或从最近产生的中选一个）</label>
+      <div class="composer" style="margin-top:6px">
+        <input id="trace_input" placeholder="tr-xxxxxxxxxxxx">
+        <button class="primary" id="trace_load" style="margin-top:0">加载瀑布图</button>
+      </div>
+      <div id="recent_traces" class="badges" style="margin-top:10px"></div>
+    </div>
+    <div id="trace_out"></div>
+  </section>
+
+  <!-- ============ 评测看板（阶段 3） ============ -->
+  <section id="view-dash" hidden>
+    <div class="card">
+      <div class="chat-bar">
+        <div class="grow">
+          <label>指标趋势（eval_results 按 git_sha 聚合）</label>
+          <select id="dash_metric"></select>
+        </div>
+        <div><label>&nbsp;</label><button class="ghost" id="dash_refresh">刷新</button></div>
+        <div><label>&nbsp;</label>
+          <button class="primary" id="dash_run" style="margin-top:0">运行评测（公开集）</button></div>
+      </div>
+      <div id="dash_chart" style="margin-top:14px"></div>
+      <div id="dash_baseline" class="meta" style="margin-bottom:0"></div>
+      <div id="dash_run_out"></div>
+    </div>
+    <div class="card">
+      <label>历史评测运行</label>
+      <div id="dash_runs"></div>
+    </div>
+  </section>
+
   <footer>
     API 文档 <a id="docs" href="#">/docs</a> ｜ 探针 <a id="hz" href="#">/healthz</a> ｜
     记忆回放 <a id="memlink" href="#">/api/memory/events</a> ｜
@@ -209,13 +257,15 @@ const CAT_NAMES = { history: "历史", food: "美食", nature: "自然", modern:
 const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
 /* ---------------- tab 切换 ---------------- */
-const PANES = { chat: "view-chat", plan: "view-plan" };
+const PANES = { chat: "view-chat", plan: "view-plan", trace: "view-trace", dash: "view-dash" };
 document.querySelectorAll("#views span[data-view]").forEach(t => {
   t.addEventListener("click", () => {
     document.querySelectorAll("#views span").forEach(x => x.classList.remove("active"));
     t.classList.add("active");
     Object.values(PANES).forEach(id => document.getElementById(id).hidden = true);
     document.getElementById(PANES[t.dataset.view]).hidden = false;
+    if (t.dataset.view === "dash") loadDash(false);
+    if (t.dataset.view === "trace") renderRecentTraces();
   });
 });
 
@@ -327,6 +377,7 @@ document.getElementById("go").addEventListener("click", async () => {
     let html = itineraryHtml(body, payload.budget);
     html += `<p class="meta">约束来源 ${body.applied_constraints.source} · 第 ${body.applied_constraints.turn} 轮</p>`;
     out.innerHTML = html;
+    rememberTrace(body.trace_id);
   } catch (e) {
     out.innerHTML = `<div class="banner bad">请求失败：${e}</div>`;
   } finally {
@@ -405,6 +456,7 @@ function renderStages(ctx) {
 
 function finishBubble(ctx, done) {
   ctx.traceId = done.trace_id;
+  rememberTrace(done.trace_id);
   const llm = done.llm ?? {};
   ctx.stageList.push({ name: "回复", degraded: llm.degraded });
   renderStages(ctx);
@@ -497,6 +549,219 @@ document.getElementById("chat_input").addEventListener("keydown", e => {
 
 refreshSessionChip();
 botNotice("你好！我是 TripAgent。告诉我预算、天数、想去的景点，我会用约束求解器排出可执行的行程，并全程记住你的约束。");
+
+/* ---------------- Trace 回放（阶段 3）：瀑布图 ---------------- */
+const SPAN_LABELS = { "memory.read": "记忆读取", "resolver.resolve": "意图解析",
+                      "memory.write": "约束写回", "solver.solve": "求解",
+                      "verifier.check": "独立校验", "responder.render": "回复渲染" };
+const LAST_TRACES = [];
+
+function rememberTrace(id) {
+  if (!id || LAST_TRACES.includes(id)) return;
+  LAST_TRACES.unshift(id);
+  if (LAST_TRACES.length > 6) LAST_TRACES.pop();
+  renderRecentTraces();
+}
+
+function renderRecentTraces() {
+  const box = document.getElementById("recent_traces");
+  if (!box) return;
+  box.innerHTML = LAST_TRACES.length
+    ? LAST_TRACES.map(t =>
+        `<span class="badge req" style="cursor:pointer" data-trace="${t}">${t}</span>`).join("")
+    : '<span class="empty">还没有 trace——去「行程对话」发一句话或跑一次手动规划。</span>';
+  box.querySelectorAll("[data-trace]").forEach(b =>
+    b.addEventListener("click", () => loadTrace(b.dataset.trace)));
+}
+
+async function loadTrace(traceId) {
+  const out = document.getElementById("trace_out");
+  out.innerHTML = '<p class="empty">加载中…</p>';
+  try {
+    const r = await fetch(API_BASE + "/api/runs/" + encodeURIComponent(traceId));
+    if (!r.ok) {
+      out.innerHTML = `<div class="banner bad">trace 不存在（${r.status}）——去对话视图产生一条。</div>`;
+      return;
+    }
+    out.innerHTML = traceHtml(await r.json());
+  } catch (e) {
+    out.innerHTML = `<div class="banner bad">请求失败：${e}</div>`;
+  }
+}
+
+function traceHtml(run) {
+  const spans = run.spans ?? [];
+  const t0 = spans.length ? Math.min(...spans.map(s => s.start_ms)) : 0;
+  const total = Math.max((spans.length ? Math.max(...spans.map(s => s.end_ms)) : 0) - t0, 1);
+  let html = `<div class="card"><h3 style="margin:0 0 10px;font-size:1rem">run ` +
+    `<code>${run.trace_id}</code> 的六段瀑布</h3>` +
+    `<p class="meta">状态 ${run.status} ｜ 会话 <code>${run.session_id}</code> ｜ ` +
+    `模型 ${run.model ?? "—"} ｜ git ${run.git_sha ?? "—"} ｜ ` +
+    `${run.started_at} → ${run.finished_at ?? "…"} ｜ 端到端 ${run.latency_ms ?? "—"}ms ｜ ` +
+    `token ${run.token_in ?? 0}+${run.token_out ?? 0}</p><div class="wf">`;
+  spans.forEach(s => {
+    const left = ((s.start_ms - t0) / total) * 100;
+    const width = Math.max(((s.end_ms - s.start_ms) / total) * 100, 0.6);
+    const bad = s.status !== "ok";
+    html += `<div class="wf-row"><div class="nm">${SPAN_LABELS[s.name] || s.name}</div>` +
+      `<div class="wf-track"><div class="wf-bar${bad ? " bad" : ""}" ` +
+      `style="left:${left.toFixed(2)}%;width:${width.toFixed(2)}%" ` +
+      `title="${s.name} ${s.start_ms}→${s.end_ms}（${s.status}）"></div></div>` +
+      `<div class="ms">${s.duration_ms}ms</div></div>`;
+    if (s.meta) {
+      html += `<div class="wf-meta">${escapeJson(s.meta)}</div>`;
+    }
+  });
+  html += "</div>";
+  html += `<details style="margin-top:12px"><summary style="cursor:pointer;` +
+    `font-size:.82rem;color:var(--sub)">请求回显</summary>` +
+    `<pre style="font-size:.74rem;overflow:auto">${escapeJson(run.request)}</pre></details>`;
+  html += "</div>";
+  return html;
+}
+
+function escapeJson(obj) {
+  return JSON.stringify(obj, null, 2).replace(/</g, "&lt;");
+}
+
+document.getElementById("trace_load").addEventListener("click", () => {
+  const v = document.getElementById("trace_input").value.trim();
+  if (v) loadTrace(v);
+});
+document.getElementById("trace_input").addEventListener("keydown", e => {
+  if (e.key === "Enter") document.getElementById("trace_load").click();
+});
+renderRecentTraces();
+
+/* ---------------- 评测看板（阶段 3）：趋势 + 运行列表 ---------------- */
+const METRIC_NAMES = {
+  "hard_constraint_pass_rate": "硬约束通过率", "time_window_violations": "时间窗冲突总数",
+  "budget_accuracy": "预算准确率", "memory_recall@6": "记忆召回（chat）",
+  "tool_success_rate.function_calling": "工具成功率·FC",
+  "tool_success_rate.capability": "工具成功率·能力",
+  "p95_latency_ms": "P95 延迟 ms", "cost_per_plan": "单均 token",
+  "final_pass_rate": "final_pass_rate",
+};
+let DASH_DATA = null;
+
+async function loadDash(force) {
+  if (DASH_DATA && !force) { renderDash(); return; }
+  document.getElementById("dash_chart").innerHTML = '<p class="empty">加载中…</p>';
+  try {
+    const r = await fetch(API_BASE + "/api/eval/reports");
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    DASH_DATA = await r.json();
+    renderDash();
+  } catch (e) {
+    document.getElementById("dash_chart").innerHTML =
+      `<div class="banner bad">看板加载失败：${e}（先运行一次评测）</div>`;
+  }
+}
+
+function pct(v) {
+  return (v === null || v === undefined || Number.isNaN(v))
+    ? "—" : (v <= 1 ? (v * 100).toFixed(1) + "%" : String(Math.round(v)));
+}
+
+function renderDash() {
+  const sel = document.getElementById("dash_metric");
+  if (!sel.options.length) {
+    (DASH_DATA.metrics || []).forEach(m => {
+      const o = document.createElement("option");
+      o.value = m;
+      o.textContent = METRIC_NAMES[m] || m;
+      sel.appendChild(o);
+    });
+    if ((DASH_DATA.metrics || []).includes("final_pass_rate")) sel.value = "final_pass_rate";
+    sel.addEventListener("change", renderDashChart);
+  }
+  renderDashChart();
+  const b = DASH_DATA.baseline;
+  document.getElementById("dash_baseline").innerHTML = b
+    ? `CI 回归基线（reports/baseline.json）：git <code>${b.git_sha}</code> · ` +
+      `评测集 v${b.eval_set_version} · final ${pct(b.metrics["final_pass_rate"])} · ` +
+      `硬约束 ${pct(b.metrics["hard_constraint_pass_rate"])} · ` +
+      `时间窗冲突 ${b.metrics["time_window_violations"] ?? "—"}`
+    : "尚无 CI 基线（reports/baseline.json 未生成）。";
+  const runs = DASH_DATA.runs || [];
+  document.getElementById("dash_runs").innerHTML = runs.length
+    ? "<table><tr><th>时间（UTC）</th><th>git_sha</th><th>final</th><th>硬约束</th>" +
+      "<th>时间窗冲突</th><th>记忆召回</th></tr>" +
+      runs.map(ru => `<tr><td>${String(ru.created_at).slice(0, 19).replace("T", " ")}</td>` +
+        `<td><code>${ru.git_sha}</code></td>` +
+        `<td>${pct(ru.metrics["final_pass_rate"]?.pass_rate)}</td>` +
+        `<td>${pct(ru.metrics["hard_constraint_pass_rate"]?.pass_rate)}</td>` +
+        `<td>${ru.metrics["time_window_violations"]?.value_sum ?? "—"}</td>` +
+        `<td>${pct(ru.metrics["memory_recall@6"]?.pass_rate)}</td></tr>`).join("") +
+      "</table>"
+    : '<p class="empty">还没有评测记录——点右上「运行评测」，或 CLI：' +
+      '<code>python -m app.eval.runner</code></p>';
+}
+
+function renderDashChart() {
+  const m = document.getElementById("dash_metric").value;
+  const box = document.getElementById("dash_chart");
+  const trend = (DASH_DATA.trends || {})[m] || [];
+  if (!trend.length) { box.innerHTML = '<p class="empty">该指标暂无数据。</p>'; return; }
+  // 聚合形态：率类 passed/total；冲突数取和；延迟/成本取均值（真 P95 见报告 md）
+  const mode = m === "time_window_violations" ? "sum"
+    : (m === "p95_latency_ms" || m === "cost_per_plan") ? "mean" : "rate";
+  const pts = trend.map(t => ({
+    sha: String(t.git_sha).slice(0, 7),
+    y: mode === "rate" ? (t.total ? t.passed / t.total : 0)
+      : mode === "sum" ? t.value : (t.total ? t.value / t.total : 0),
+  }));
+  const ys = pts.map(p => p.y);
+  const ymin = mode === "rate" ? 0 : 0;
+  const ymax = mode === "rate" ? 1 : (Math.max(...ys) * 1.15 || 1);
+  const W = 640, H = 210, L = 46, R = 12, T = 14, B = 34;
+  const x = i => L + (pts.length === 1 ? (W - L - R) / 2 : i * (W - L - R) / (pts.length - 1));
+  const y = v => H - B - (v - ymin) / (ymax - ymin || 1) * (H - T - B);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img">`;
+  svg += `<line x1="${L}" y1="${y(ymin)}" x2="${W - R}" y2="${y(ymin)}" stroke="#e6e8f0"/>`;
+  [ymin, (ymin + ymax) / 2, ymax].forEach(v => {
+    svg += `<text x="${L - 6}" y="${y(v) + 4}" text-anchor="end" font-size="10" fill="#6b7080">` +
+      `${mode === "rate" ? pct(v) : Math.round(v)}</text>` +
+      `<line x1="${L}" y1="${y(v)}" x2="${W - R}" y2="${y(v)}" stroke="#f0f2f8"/>`;
+  });
+  svg += `<polyline fill="none" stroke="#2f5af5" stroke-width="2" points="` +
+    pts.map((p, i) => `${x(i)},${y(p.y)}`).join(" ") + '"/>';
+  pts.forEach((p, i) => {
+    svg += `<circle cx="${x(i)}" cy="${y(p.y)}" r="4" fill="#2f5af5"><title>${p.sha}: ` +
+      `${mode === "rate" ? pct(p.y) : Math.round(p.y * 10) / 10}</title></circle>`;
+    if (pts.length <= 8 || i % 2 === 0) {
+      svg += `<text x="${x(i)}" y="${H - B + 16}" text-anchor="middle" font-size="10" ` +
+        `fill="#6b7080">${p.sha}</text>`;
+    }
+  });
+  svg += "</svg>";
+  box.innerHTML = svg;
+}
+
+document.getElementById("dash_refresh").addEventListener("click", () => loadDash(true));
+
+document.getElementById("dash_run").addEventListener("click", async () => {
+  const btn = document.getElementById("dash_run");
+  const out = document.getElementById("dash_run_out");
+  btn.disabled = true;
+  btn.textContent = "评测中…（约 1 分钟）";
+  out.innerHTML = '<p class="empty">公开集 current 列运行中：plan 32 + chat 脚本驱动。</p>';
+  try {
+    const r = await fetch(API_BASE + "/api/eval/run", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    });
+    const body = await r.json();
+    if (!r.ok) throw new Error(JSON.stringify(body.detail ?? body).slice(0, 300));
+    out.innerHTML = `<div class="banner ok">完成：${body.summary} · 报告 ` +
+      `<code>${body.report_path}</code>（git ${body.git_sha}）</div>`;
+    await loadDash(true);
+  } catch (e) {
+    out.innerHTML = `<div class="banner bad">评测失败：${e}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "运行评测（公开集）";
+  }
+});
 </script>
 </body>
 </html>
