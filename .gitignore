@@ -29,6 +29,7 @@ htmlcov/
 .vscode/
 .DS_Store
 Thumbs.db
+.zcode/
 
 # --- 本地技术文档（个人笔记，不作为仓库证据链的一部分）---
 docs/
