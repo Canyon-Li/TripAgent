@@ -81,7 +81,9 @@ def test_merge_explicit_overrides_scalar_unions_lists():
     by = {c.field: c for c in merged}
     assert by["budget"].value == 8000 and by["budget"].source == "request"
     assert by["must_visit"].value == ["summer_palace", "forbidden_city"]
-    assert by["must_visit"].source == "request"
+    # 列表并集溯源保留记忆侧：首提轮次/来源不被本轮覆写（TASKS 2.10 口径）
+    assert by["must_visit"].source.startswith("memory_views#")
+    assert by["must_visit"].turn == 1
     assert by["days"].value == 3 and by["days"].source.startswith("memory_views#")
     assert by["days"].turn == 1
 

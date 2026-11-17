@@ -89,6 +89,7 @@ def merge_constraints(
 
     - 单值字段：显式优先（记忆兜底——即使模型漏抽字段，约束链路也不滑点）；
     - 列表字段（must_visit / preferences）：并集，显式在前、保序去重；
+      溯源保留记忆侧（首提轮次/来源不因本轮并集被覆写）；
     - value=None（retract）的显式项跳过，不进入约束集。
     """
     out: dict[str, ConstraintOrigin] = {c.field: c for c in memory}
@@ -98,8 +99,9 @@ def merge_constraints(
         existing = out.get(field)
         if existing is not None and isinstance(existing.value, list) and isinstance(value, list):
             merged = list(dict.fromkeys(value + existing.value))
-            out[field] = replace(existing, value=merged, source="request", scope="request",
-                                 turn=turn, confidence=1.0)
+            # 溯源保留记忆侧（若存在）：并集字段的首提轮次/来源以最早成员进入
+            # 约束集时为准（TASKS 2.10「首提轮次」口径），不被本轮并集覆写抹掉
+            out[field] = replace(existing, value=merged)
         else:
             out[field] = ConstraintOrigin(
                 field=field, value=value, source="request", scope="request", turn=turn,
