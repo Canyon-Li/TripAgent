@@ -3,8 +3,7 @@
 以「北京多日行程规划」为业务载体，构建 Agent 运行所需的四层基础设施：**记忆系统、评测观测、注册发现、框架运行时**。业务侧用确定性约束求解保证行程可执行（LLM 不参与时间排程，ADR-001），基础设施侧保证 Agent 在多轮对话、版本迭代和组件故障下仍然可靠。
 
 - 设计文档：[project.md](project.md)（含 ADR 决策记录、API 契约、数据模型）
-- 总体架构：[architecture.svg](architecture.svg)
-- 任务清单：[TASKS.md](TASKS.md)（阶段 0–4）
+- 任务清单：[TASKS.md](TASKS.md)（阶段 0–5）
 
 ## 快速上手
 

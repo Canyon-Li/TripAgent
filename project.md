@@ -8,7 +8,7 @@
 | 版本 | v0.3.0 |
 | 最后更新 | 2026-11-18 |
 | 目标读者 | 项目开发者、面试考官、后续维护者 |
-| 关联文件 | `architecture.svg`（总体架构图）、`TASKS.md`（阶段 0–2 任务清单） |
+| 关联文件 | `TASKS.md`（阶段 0–5 任务清单）、`reports/audit-*.md`（分支与文档审计） |
 | 技术栈 | Python 3.11+ / FastAPI / SQLite / OR-Tools / OpenAI-compatible LLM / 静态前端 / Docker Compose |
 
 > **数据诚实约定**：文中所有标记为 `TBD` 的指标均为待回填占位。必须由评测脚本在对应阶段真实跑出后写入，未实现前不得填写数字。评审与面试时应能出示评测报告原文和 commit 记录。
@@ -119,8 +119,6 @@
 ---
 
 ## 5. 总体架构
-
-完整架构图见 **`architecture.svg`**（同目录，可直接被 Markdown / 浏览器 / 简历引用）。
 
 系统分六层，自上而下：
 
@@ -502,7 +500,6 @@ POST /api/plan
 ```
 .
 ├── project.md                 # 本文档
-├── architecture.svg           # 总体架构图
 ├── README.md                  # 快速上手 + 面试导航
 ├── docker-compose.yml         # api / web / (可选) worker
 ├── .env.example               # 不含真实密钥
@@ -637,7 +634,7 @@ python -m app.eval.runner --baseline
 
 **边界追问（15 秒）**："我没上 A2A 协议栈：求解器和校验器是确定性服务，对端不需要自主规划；我只发布一张只读 Agent Card 让发现可被外部读取，卡片里明确写了 discovery-only。真要跨团队委派时的升级条件，我写进了 ADR-009。"
 
-**必须能出示的证据**：可访问 demo URL、`architecture.svg`、评测报告 diff、一条完整 trace 瀑布图、Registry 灰度回滚录屏、commit 历史。
+**必须能出示的证据**：可访问 demo URL、评测报告 diff、一条完整 trace 瀑布图、Registry 灰度回滚录屏、commit 历史。
 
 **高频追问准备**：为什么 Routing 不用 `AddCircuit`；为什么记忆不用向量库；评测集如何防止过拟合；Registry 与普通函数调用表的区别；校验器为什么不复用求解器代码；SQLite 在什么条件下必须换掉；function calling 用在哪、为什么不给模型看全部工具；工具参数幻觉、循环调用与版本漂移怎么防；A2A / MCP / function calling 三者区别与为什么不上 A2A；Capability card 与 Agent Card 的区别；什么条件下才会真正引入 A2A；单请求内是 workflow、凭什么仍称 Agent 系统。
 
