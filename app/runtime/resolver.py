@@ -21,13 +21,15 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from app.llm.adapter import LLMAdapter, LLMError, LLMRetryableError, UsageMeter
 from app.llm.tools import (
     MAX_TOOL_CALLS,
     PREFERENCE_KEYWORDS,
     TOOLS_SCHEMA,
+    AskClarificationArgs,
+    RecallConstraintArgs,
     SubmitPlanRequestArgs,
     validate_tool_call,
 )
@@ -153,9 +155,12 @@ def resolve(
                     if v is not None and k not in ("city", "confidence")
                 }
             elif tc.name == "ask_clarification":
-                clarification = (args.field, args.reason)  # type: ignore[attr-defined]
+                # validate_tool_call 契约：args 必是 name 对应的白名单模型（无默认参，不可空造）
+                ca = cast(AskClarificationArgs, args)
+                clarification = (ca.field, ca.reason)
             elif tc.name == "recall_constraint":
-                key = args.key  # type: ignore[attr-defined]
+                ra = cast(RecallConstraintArgs, args)
+                key = ra.key
                 hit = recall_lookup(key) if recall_lookup else None
                 if hit is not None:
                     recalled[key] = hit
@@ -177,12 +182,11 @@ def resolve(
         if fields or clarification:
             break  # 终态：拿到可执行约束或澄清请求
         if tool_replies and total_calls < MAX_TOOL_CALLS:
-            messages = [
-                *messages,
-                {"role": "assistant", "content": result.text or "",
-                 "tool_calls": recall_assistant_calls},
-                *tool_replies,
-            ]
+            assistant_msg: dict[str, Any] = {
+                "role": "assistant", "content": result.text or "",
+                "tool_calls": recall_assistant_calls,
+            }
+            messages = [*messages, assistant_msg, *tool_replies]
             continue
         if not tool_replies:
             break  # 无进展（违规或空轮）→ 终止

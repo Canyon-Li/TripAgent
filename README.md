@@ -3,8 +3,7 @@
 以「北京多日行程规划」为业务载体，构建 Agent 运行所需的四层基础设施：**记忆系统、评测观测、注册发现、框架运行时**。业务侧用确定性约束求解保证行程可执行（LLM 不参与时间排程，ADR-001），基础设施侧保证 Agent 在多轮对话、版本迭代和组件故障下仍然可靠。
 
 - 设计文档：[project.md](project.md)（含 ADR 决策记录、API 契约、数据模型）
-- 总体架构：[architecture.svg](architecture.svg)
-- 任务清单：[TASKS.md](TASKS.md)（阶段 0–4）
+- 任务清单：[TASKS.md](TASKS.md)（阶段 0–5）
 
 ## 快速上手
 
@@ -112,7 +111,7 @@ scripts/        export_pois / build_matrix（一次性导出）+ check_plans（p
 web/            静态前端（无构建；行程对话 + 手动规划 + Trace 回放瀑布图 + 评测看板 + 能力注册表五视图）+ nginx.conf（/api 与 /.well-known 同源反代）
 data/           pois.json / matrix.json / eval_cases.jsonl（40 条全集，含 20% hidden）/ tripagent.db（库文件不入库）
 reports/        eval-<sha>.md 评测报告 + baseline.json（CI 回归基线）
-tests/          pytest（契约 / 求解 / 校验 / 属性 / 记忆一致性 / 护栏 / 评测 / 注册路由 / 心跳故障注入等 169 项）
+tests/          pytest（契约 / 求解 / 校验 / 属性 / 记忆一致性 / 护栏 / 评测 / 注册路由 / 心跳故障注入 / 文档同步等 184 项）
 ```
 
 ## 环境变量
@@ -121,7 +120,7 @@ tests/          pytest（契约 / 求解 / 校验 / 属性 / 记忆一致性 / �
 
 ## CI
 
-GitHub Actions（[ci.yml](.github/workflows/ci.yml)）：`lint`（ruff）+ `test`（pytest，迁移后运行）+ `eval`（公开集 FakeLLM 确定性回归，对比 `reports/baseline.json`——硬约束类指标任一退化或 final_pass_rate 降 >2pp 即失败，§12）；main 分支保护要求 PR 必过这三项检查（复核：`gh api repos/Canyon-Li/TripAgent/branches/main/protection --jq .required_status_checks.contexts` → `["test","lint","eval"]`）。
+GitHub Actions（[ci.yml](.github/workflows/ci.yml)）：`lint`（ruff）+ `typecheck`（mypy，宽松起步）+ `test`（pytest，迁移后运行；含 README 测试计数同步断言）+ `eval`（公开集 FakeLLM 确定性回归，对比 `reports/baseline.json`——硬约束类指标任一退化或 final_pass_rate 降 >2pp 即失败，§12）；main 分支保护要求 PR 必过这四项检查（复核：`gh api repos/Canyon-Li/TripAgent/branches/main/protection --jq .required_status_checks.contexts` → `["test","lint","typecheck","eval"]`）。
 
 ## 状态与路线图
 

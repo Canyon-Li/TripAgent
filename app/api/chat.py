@@ -20,7 +20,7 @@ import datetime as dt
 import json
 import time
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
@@ -208,7 +208,7 @@ def _run_turn(
     repo: DataRepository,
     trace_id: str,
     meter: UsageMeter,
-    finish: Callable[[str], int],
+    finish: Callable[..., int],  # _finish(status="succeeded")：默认参在 Callable 类型上不可见
 ) -> Iterator[str]:
     """单轮主体（§7.1 主链路）；成功路径内部自行 finish("succeeded")。"""
     poi_index = tuple((p.id, p.name) for p in repo.pois)
@@ -265,12 +265,13 @@ def _run_turn(
             "llm": meter.as_dict(), "latency_ms": latency,
         })
 
-    def _replay_fallback(note: str) -> Iterator[str]:
+    def _replay_fallback(note: str) -> Generator[str, None, bool]:
         """§7.1「规则模板 + 最近一次可行方案」降级：LLM 已失败且本轮无法产出新方案时，
-        回退本 session 最近一次可行行程（runs.response_json），明确标注降级与来源。"""
+        回退本 session 最近一次可行行程（runs.response_json），明确标注降级与来源。
+        返回值（yield from 的结果）= 是否真的回放了方案（False = 无历史可用）。"""
         hit = runs_db.get_last_feasible_run(req.session_id, exclude_trace_id=trace_id)
         if hit is None:
-            return None
+            return False
         fb_trace, fb_plan = hit["trace_id"], dict(hit["response"])
         reply = (
             f"（LLM 暂不可用，已降级）{note}。"
@@ -291,7 +292,7 @@ def _run_turn(
             "fallback": {"type": "last_feasible", "trace_id": fb_trace},
             "llm": meter.as_dict(),
         })
-        return fb_trace
+        return True
 
     if outcome.kind != "plan":
         field, reason = outcome.clarification or ("message", "请说明行程约束")

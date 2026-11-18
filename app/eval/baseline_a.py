@@ -15,7 +15,7 @@ import re
 from app.db.repository import get_repository
 from app.eval.cases import PlanCase
 from app.eval.graders import CaseResult, grade_plan_case
-from app.verifier.verify import DayClaim, StopClaim, VerifyRequest, verify_itinerary
+from app.verifier.verify import DayClaim, StopClaim, VerifyRequest, Violation, verify_itinerary
 
 _SYSTEM = (
     "你是行程规划助手。根据用户的行程要求和景点清单，直接排一份逐日行程，"
@@ -125,9 +125,10 @@ def run(cases, llm) -> list[CaseResult]:  # noqa: ANN001
             must_visit=frozenset(req.must_visit),
             start_date=dt.date.fromisoformat(req.start_date),
         ), claims)
-        violations = list(verification.violations)
+        # 解析失败按违反计数（诚实口径）：Violation 与错误文案同列
+        violations: list[Violation | str] = list(verification.violations)
         if parse_errors:
-            violations = violations + parse_errors  # 解析失败按违反计数（诚实口径）
+            violations += parse_errors
 
         pseudo_body = {
             "trace_id": "",
@@ -139,8 +140,10 @@ def run(cases, llm) -> list[CaseResult]:  # noqa: ANN001
             ],
             "verification": {
                 "violations": [
-                    {"type": v.type, "detail": v.detail, "day_index": v.day_index,
-                     "poi": v.poi}
+                    ({"type": v.type, "detail": v.detail, "day_index": v.day_index,
+                      "poi": v.poi}
+                     if isinstance(v, Violation) else {"type": "parse_error", "detail": v,
+                                                       "day_index": None, "poi": None})
                     for v in violations
                 ],
                 "recomputed_budget": verification.recomputed_budget,

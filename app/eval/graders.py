@@ -50,7 +50,7 @@ class CaseResult:
         self.metrics[metric] = (passed, float(value))
 
 
-def _num_eq(a: float, b: float) -> bool:
+def _num_eq(a: float | int | str, b: float | int | str) -> bool:
     return math.isclose(float(a), float(b), rel_tol=1e-9, abs_tol=1e-6)
 
 
@@ -195,8 +195,9 @@ def grade_chat_case(
     tw_violations = len(final_plan.get("verification", {}).get("violations") or [])
     if a.final_status == "feasible" and final_plan.get("status") == "feasible":
         stops = {s["poi"] for d in final_plan.get("days", []) for s in d.get("stops", [])}
-        want_must = next(
+        want_raw = next(
             (w.value for w in a.memory_recall if w.field == "must_visit"), [])
+        want_must: list[str] = list(want_raw) if isinstance(want_raw, list) else []
         if a.must_visit_covered and want_must:
             missing = set(want_must) - stops
             if missing:

@@ -12,12 +12,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+from typing import cast
 
 from sqlalchemy import select
 
 from app.db.base import SessionLocal
 from app.db.models import Capability
-from app.registry.cards import CapabilityCard, Status
+from app.registry.cards import CapabilityCard, Kind, Status
 from app.registry.seed import DEFAULT_CARDS
 
 
@@ -29,14 +30,15 @@ def _row_to_card(row: Capability) -> CapabilityCard:
     return CapabilityCard(
         name=row.name,
         version=row.version,
-        kind=row.kind,  # type: ignore[arg-type] —— DB 无枚举约束，入口已校验
+        # DB 无枚举约束，读侧收窄到 Literal（写入侧经 pydantic 校验）
+        kind=cast(Kind, row.kind),
         input_schema=json.loads(row.input_schema),
         output_schema=json.loads(row.output_schema),
         endpoint=row.endpoint,
         healthcheck=json.loads(row.healthcheck),
         cost_estimate=row.cost_estimate,
         tags=[t for t in row.tags.split(",") if t],
-        status=row.status,  # type: ignore[arg-type]
+        status=cast(Status, row.status),
         traffic_weight=row.traffic_weight,
     )
 

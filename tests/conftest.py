@@ -43,6 +43,8 @@ def default_registry_state():
     """阶段 4：Registry 默认态（solver v1=100/v2=0、关键卡 active）前后复位。
 
     session 级 client 与 DB 被跨文件复用——任何改权重/摘状态的测试都应依赖本件。
+    注意：本件只复位权重与 status；整卡 POST upsert 会覆写 input_schema 等其他
+    字段且不被复位——upsert 类测试必须用当前库里的真实卡体，勿用占位 schema。
     """
     from app.registry import service
 

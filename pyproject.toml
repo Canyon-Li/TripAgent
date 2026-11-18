@@ -18,6 +18,7 @@ dependencies = [
 dev = [
     "pytest>=8.3",
     "ruff>=0.9",
+    "mypy>=1.14",
 ]
 
 [build-system]
@@ -32,6 +33,19 @@ line-length = 100
 target-version = "py311"
 # 生成的迁移脚本与 ruff 格式风格不一路（CI 口径本就不含该目录），全仓自查时排除
 extend-exclude = ["alembic/versions"]
+
+# 类型检查（CI typecheck job）：宽松起步——不强制注解全覆盖，只拦真实类型错误
+# （2026-11-18 retro：心跳工厂签名 bug 本可被当场抓住，故接入）
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+no_implicit_optional = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "ortools.*"
+ignore_missing_imports = true
+ignore_errors = true
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B"]

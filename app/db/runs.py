@@ -55,8 +55,11 @@ def get_last_feasible_run(session_id: str, exclude_trace_id: str | None = None) 
         for run in db.scalars(stmt).all():
             if exclude_trace_id and run.trace_id == exclude_trace_id:
                 continue
+            raw = run.response_json
+            if raw is None:  # 查询已过滤，防御性收窄（mypy）
+                continue
             try:
-                resp = json.loads(run.response_json)
+                resp = json.loads(raw)
             except (TypeError, ValueError):
                 continue
             if resp.get("status") == "feasible":
