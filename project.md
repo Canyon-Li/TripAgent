@@ -252,6 +252,8 @@
 
 Capability card（§10 有 schema）。Registry 提供：注册 / 注销、按 `tags` + `input_schema` 发现、30 秒心跳健康检查、失败自动摘除、`traffic_weight` 灰度、`pinned | canary | latest` 版本策略。
 
+**实现口径（2026-11-18，阶段 4）**：版本策略三态落在 `traffic_weight` 一维上，由 `policy_view` 按当前权重判定并随 `GET /api/registry/capabilities` 下发——权重全量绑定单一版本 = `pinned`（回滚即重新 pin），多版本分权重 = `canary`，无承接版本 = `off`；`latest` 一栏始终给出各 name 版本序最高的 active 卡（`discover(latest_only=True)` / `?latest=true`），新版本以权重 0 注册、由人放量——保守默认，不自动切 latest。`input_schema` 发现以字段子集匹配实现（`discover(input_fields=[...])`）。心跳分发依据是卡内 `healthcheck.type` 字段（§9 该列的用途本体），动态注册的卡用已知 type 即自动纳入「失败自动摘除」。
+
 **回滚不重启**：灰度权重与版本绑定存在 SQLite，路由时读取；回滚只需更新一行记录。这一设计把"重启与版本管理"从运维杂活变成可演示的平台能力。
 
 ### 7.5 框架稳定性（职责②）
@@ -318,7 +320,7 @@ Capability card（§10 有 schema）。Registry 提供：注册 / 注销、按 `
 }
 ```
 
-**明确不做**：不实现 `message/send`、Task 状态机、SSE 制品流、gRPC binding、签名 Agent Card，也不实现主动调用其他 Agent 的 A2A client；不引入 `a2a-sdk` 等依赖。卡片由 `/api/plan` 的请求 schema 生成，二者字段必须一致（§15 契约测试守住）。
+**明确不做**：不实现 `message/send`、Task 状态机、SSE 制品流、gRPC binding、签名 Agent Card，也不实现主动调用其他 Agent 的 A2A client；不引入 `a2a-sdk` 等依赖。卡片由 `/api/plan` 的请求 schema 生成，二者字段必须一致（§15 契约测试守住——含与服务端 OpenAPI 实际 schema 的独立对照）。实现注记：`url` 字段按请求 host 动态生成（反代后仍指向正确入口，nginx 需透传 `Host: $http_host`），其余字段静态。
 
 **为什么值得做这一张卡片**：JD 第 5 条用的词是"Agent 注册、管理、发现架构"，与 A2A 的 Agent Card 直接呼应。能拿出一张可被外部读取的发现文档、同时说清"为什么没有进一步实现协议"，比只做一个进程内函数调用表更贴近平台工程，也比硬套一个用不上的协议栈更可信。
 
@@ -446,8 +448,10 @@ CREATE TABLE eval_results (
 | `GET` | `/api/runs/{trace_id}` | 返回 run + spans，供 Trace 视图回放 |
 | `POST` | `/api/eval/run` | 触发全量评测，返回报告路径 |
 | `GET` | `/api/eval/reports` | 列出历史报告与指标趋势 |
-| `GET` / `POST` | `/api/registry/capabilities` | 查询 / 注册能力卡片 |
+| `GET` / `POST` | `/api/registry/capabilities` | 查询 / 注册能力卡片（GET 支持 kind/tag/latest 发现参数，响应含 `policy_view` 版本策略视图） |
 | `GET` | `/api/registry/health` | 各能力心跳状态 |
+| `POST` | `/api/registry/capabilities/{name}/{version}/weight` | 窄更新辅助端点（阶段 4）：只改一行 `traffic_weight`——灰度/回滚通道，避免整卡 upsert 误覆写 |
+| `POST` | `/api/registry/capabilities/{name}/{version}/deregister` | 窄更新辅助端点（阶段 4）：注销（status→retired 归档） |
 | `GET` | `/api/memory/events?session_id=&user_id=&scope=` | Ledger 事件回放（追加序，可追溯 supersedes 链） |
 | `GET` | `/api/memory/views?session_id=&user_id=` | scope 链当前活跃 hard_constraints 视图（Memory.read 同源） |
 | `POST` | `/api/memory/rebuild` | 重放全量 Ledger 重建 Views，返回一致性结果 |

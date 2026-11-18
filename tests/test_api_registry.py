@@ -12,12 +12,8 @@ _DEFAULT_REFS = {"solver@v1", "solver@v2", "matrix@static", "verifier@v1",
 
 
 @pytest.fixture(autouse=True)
-def _restore_weights():
-    service.set_weight("solver", "v1", 100)
-    service.set_weight("solver", "v2", 0)
+def _restore_weights(default_registry_state):
     yield
-    service.set_weight("solver", "v1", 100)
-    service.set_weight("solver", "v2", 0)
 
 
 def test_get_capabilities_lists_defaults(client: TestClient):
@@ -37,16 +33,30 @@ def test_get_capabilities_filter_by_kind(client: TestClient):
     assert refs == {"verifier"}
 
 
+def test_get_capabilities_tag_and_latest_params(client: TestClient):
+    r = client.get("/api/registry/capabilities", params={"tag": "score-first"})
+    assert {c["name"] + "@" + c["version"] for c in r.json()["capabilities"]} == {"solver@v2"}
+    r = client.get("/api/registry/capabilities", params={"latest": "true"})
+    by_name = {c["name"]: c["version"] for c in r.json()["capabilities"]}
+    assert by_name["solver"] == "v2" and by_name["matrix"] == "static"
+
+
+def test_get_capabilities_carries_policy_view(client: TestClient):
+    r = client.get("/api/registry/capabilities", params={"kind": "solver"})
+    policies = {p["name"]: p for p in r.json()["policies"]}
+    assert policies["solver"]["policy"] == "pinned"  # 默认 100/0 = pinned 到 v1
+    assert policies["solver"]["latest"] == "v2"
+
+
 def test_post_upsert_is_the_rollback_channel(client: TestClient):
-    """POST 整卡 upsert 改权重 → 下一次 /api/plan 生效（回滚通道，§7.4）。"""
-    r = client.post("/api/registry/capabilities", json={
-        "name": "solver", "version": "v2", "kind": "solver",
-        "input_schema": {"type": "object"}, "output_schema": {"type": "object"},
-        "endpoint": "inprocess://app.solver.routing.solve_plan#v2",
-        "healthcheck": {"type": "self_test_solve"},
-        "tags": ["planning", "vrptw", "score-first"],
-        "status": "active", "traffic_weight": 100,
-    })
+    """POST 整卡 upsert 改权重 → 下一次 /api/plan 生效（回滚通道，§7.4）。
+
+    POST 体用当前库里的真实卡（只改 weight）——整卡 upsert 会覆写全部字段，
+    用占位 schema 会破坏后续 input_schema 发现类断言。
+    """
+    current = service.get_card("solver", "v2").model_dump()
+    current["traffic_weight"] = 100
+    r = client.post("/api/registry/capabilities", json=current)
     assert r.status_code == 200
     assert service.route("solver", "tr-api-1").version == "v2"  # 权重全在 v2
 

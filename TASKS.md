@@ -95,6 +95,8 @@
 
 **验收**：改 `traffic_weight` 后下一次 `/api/plan` 即切版本（不重启进程，span 可见）；心跳失败能力被摘除、恢复后自动回切、降级路径不硬凑；`/.well-known/agent.json` 与 `/api/plan` 请求 schema 字段一致且声明 discovery-only；`pytest -q` 全绿 + ruff clean + `check_plans` 全过 + eval `--ci` exit 0；浏览器出示 Registry 灰度回滚操作（§16 证据）。　✅ 2026-11-18 全过：compose 环境实测权重改行→请求即切版本（registry.route/solver.solve meta 双核验），回滚仅一行记录零重启；v1 心跳失败摘除→流量 20/20 落 v2→恢复回切（tests 复现）；降级三路（LLM 规则模板 / 能力 503 不硬凑 / 最近可行方案——阶段 3.4）均可用；agent card 契约 7 测试含字段一致性与 task 端点负向断言；pytest 169 + ruff 双口径 + check_plans 32/32 + eval --ci exit 0；浏览器（Playwright）实测第五视图操作与瀑布版本标注。**阶段 4 冻结。**
 
+> **Code review 修复（2026-11-18，53cc2f8..9c980d5 两轴审查后）**：①心跳分发改按卡内 `healthcheck.type`（§9 该列用途本体）——动态注册的卡自动纳入「失败自动摘除」，未知 type 如实报 unknown 不误摘；②§7.4 版本策略落地——`policy_view`（pinned/canary/off + latest 视图，随 GET capabilities 下发）+ `discover(latest_only)`，保守默认新版本权重 0 不自动切 latest；③§7.4 `input_schema` 发现补齐（`discover(input_fields=[])` 字段子集匹配）；④matrix 闸门改按 name（`route_name`）——同 kind 无关卡不再能冒名顶替掩盖摘除；⑤未知 solver 版本拒路由与摘除/摘卡同走 error span 口径；⑥Agent Card 契约测试补**独立来源**对照（解 OpenAPI $ref 取 PlanRequest properties，不再与卡端同源常量恒真比对）；⑦迁移 4 个长文本列 String→Text 对齐 §9；⑧smell 清理：solver 卡从 SOLVER_VERSIONS 派生（新增版本单点改）、HEARTBEAT_INTERVAL_S 死常量删除、plan.py 三处 finish_run 收口、set_status 状态枚举校验、四处权重复位 fixture 收敛 conftest、`__init__` 导出补齐、api 端点 docstring 补全、种子路径对称；⑨文档回写：§7.4 实现口径注记、§7.7 url 动态生成注记、§10 补 weight/deregister 两条辅助端点。修后 pytest 183 绿 + ruff clean + fake 40/40 + check_plans 32/32。
+
 ---
 
 ## 后续（阶段 4 冻结后）

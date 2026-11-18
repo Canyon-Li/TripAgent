@@ -75,15 +75,22 @@ def run_plan_pipeline(
     # ---- Registry 路由（§7.1：Memory.read 之后、Solver.solve 之前）----
     # solver 按 traffic_weight 加权选版本分发参数（ADR-007 灰度载体）；
     # matrix / verifier 单版本进程内能力，路由结果作为可用性闸门（摘除即 503 不硬凑）。
+    # 按 name 而非 kind 闸门：kind 桶会被同桶无关卡冒名顶替（如再注册一张 tool 卡
+    # 即掩盖 matrix 摘除）。
     r0 = tick()
     try:
-        solver_card = registry.route_required("solver", trace_id)
-        matrix_card = registry.route_required("tool", trace_id)
-        verifier_card = registry.route_required("verifier", trace_id)
-    except registry.CapabilityUnavailableError:
+        solver_card = registry.route_name_required("solver", trace_id)
+        matrix_card = registry.route_name_required("matrix", trace_id)
+        verifier_card = registry.route_name_required("verifier", trace_id)
+        params = SOLVER_VERSIONS.get(solver_card.version)
+        if params is None:  # 有卡无参数绑定：拒绝路由（与心跳口径一致）
+            raise registry.CapabilityUnavailableError(
+                f"solver@{solver_card.version} 无参数绑定（SOLVER_VERSIONS 未收录）"
+            )
+    except registry.CapabilityUnavailableError as e:
         runs_db.add_span(
             trace_id, "registry.route", *span_bounds(r0), "error",
-            meta={"error": "no routable capability（心跳摘除或未注册）"},
+            meta={"error": str(e)},
         )
         raise
     runs_db.add_span(
@@ -94,11 +101,6 @@ def run_plan_pipeline(
             "verifier": verifier_card.ref,
         },
     )
-    params = SOLVER_VERSIONS.get(solver_card.version)
-    if params is None:  # 动态注册的未知 solver 版本：有卡无参数绑定，拒绝路由
-        raise registry.CapabilityUnavailableError(
-            f"solver@{solver_card.version} 无参数绑定（SOLVER_VERSIONS 未收录）"
-        )
 
     # ---- 求解 ----
     s0 = tick()

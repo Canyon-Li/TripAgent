@@ -30,18 +30,9 @@ def install_llm(client: TestClient) -> Callable[[FakeLLM], None]:
 
 
 @pytest.fixture(autouse=True)
-def _restore_registry():
+def _restore_registry(default_registry_state):
     """注入后恢复：session 级 client 与 DB 被后续测试复用，状态必须归位。"""
-    def _reset() -> None:
-        service.set_status("matrix", "static", "active")
-        service.set_status("solver", "v1", "active")
-        service.set_status("solver", "v2", "active")
-        service.set_weight("solver", "v1", 100)
-        service.set_weight("solver", "v2", 0)
-
-    _reset()
     yield
-    _reset()
 
 
 _PLAN_REQ = {
@@ -81,7 +72,7 @@ def test_matrix_capability_unavailable_returns_503(client: TestClient):
 
     ready = client.get("/readyz")
     assert ready.status_code == 503
-    assert "tool" in ready.json()["checks"]["registry"]
+    assert "matrix" in ready.json()["checks"]["registry"]  # 按 name 报告（与闸门同口径）
 
     r = client.post("/api/plan", json=_PLAN_REQ)
     assert r.status_code == 503
@@ -114,7 +105,10 @@ def _raise_crash() -> None:
 
 def test_solver_v1_heartbeat_failure_fails_over_to_v2(monkeypatch, client: TestClient):
     """心跳失败自动摘除：v1 摘除后流量全落 v2；绑定恢复 + 心跳通过后自动回切（§7.4）。"""
-    monkeypatch.setitem(registry_health.BINDINGS, ("solver", "v1"), _raise_crash)
+    # 按卡内 healthcheck.type 分发（动态卡同路径）：工厂对 v1 产出崩溃检查
+    monkeypatch.setitem(
+        registry_health.HEALTHCHECK_BINDINGS, "self_test_solve",
+        lambda card: _raise_crash if card.version == "v1" else (lambda: None))
     service.set_weight("solver", "v1", 100)
     service.set_weight("solver", "v2", 100)
 
@@ -130,7 +124,8 @@ def test_solver_v1_heartbeat_failure_fails_over_to_v2(monkeypatch, client: TestC
     assert solve_meta["solver_version"] == "v2"
 
     # 绑定恢复 → 心跳通过 → 自动回切 active（retired 不复活，另由 API 测试覆盖）
-    monkeypatch.setitem(registry_health.BINDINGS, ("solver", "v1"), lambda: None)
+    monkeypatch.setitem(
+        registry_health.HEALTHCHECK_BINDINGS, "self_test_solve", registry_health.solver_check)
     registry_health.run_heartbeat()
     assert service.get_card("solver", "v1").status == "active"
     assert "v1" in {service.route("solver", f"tr-fi2-{i}").version for i in range(20)}

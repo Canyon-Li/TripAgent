@@ -17,7 +17,7 @@ from sqlalchemy import select
 
 from app.db.base import SessionLocal
 from app.db.models import Capability
-from app.registry.cards import CapabilityCard
+from app.registry.cards import CapabilityCard, Status
 from app.registry.seed import DEFAULT_CARDS
 
 
@@ -39,6 +39,14 @@ def _row_to_card(row: Capability) -> CapabilityCard:
         status=row.status,  # type: ignore[arg-type]
         traffic_weight=row.traffic_weight,
     )
+
+
+def version_key(version: str) -> tuple:
+    """版本排序键：纯数字段按数值比较（v1<v2<v10），否则回退字符串档。"""
+    parts = version.split(".")
+    if parts and all(p.isdigit() for p in parts):
+        return (0, [int(p) for p in parts], "")
+    return (1, [0], version)
 
 
 def ensure_seed() -> None:
@@ -95,9 +103,15 @@ def list_cards(include_retired: bool = True) -> list[CapabilityCard]:
 def discover(
     kind: str | None = None,
     tag: str | None = None,
+    input_fields: list[str] | None = None,
     active_only: bool = True,
+    latest_only: bool = False,
 ) -> list[CapabilityCard]:
-    """按 kind / tag 发现能力卡（§7.4；active_only 剔除 unhealthy 与 retired）。"""
+    """按 kind / tag / input_schema 字段发现能力卡（§7.4「tags + input_schema 发现」）。
+
+    input_fields：要求卡声明能接受的输入字段（卡 input_schema.fields 的子集请求）；
+    latest_only：每个 name 只保留版本序最高的 active 卡（§7.4 latest 版本策略）。
+    """
     cards = list_cards(include_retired=not active_only)
     if active_only:
         cards = [c for c in cards if c.status == "active"]
@@ -105,6 +119,19 @@ def discover(
         cards = [c for c in cards if c.kind == kind]
     if tag:
         cards = [c for c in cards if tag in c.tags]
+    if input_fields:
+        def _covers(c: CapabilityCard) -> bool:
+            declared = set(c.input_schema.get("fields") or [])
+            return set(input_fields) <= declared
+        cards = [c for c in cards if _covers(c)]
+    if latest_only:
+        by_name: dict[str, CapabilityCard] = {}
+        for c in cards:
+            cur = by_name.get(c.name)
+            newer = cur is None or version_key(c.version) > version_key(cur.version)
+            if newer:
+                by_name[c.name] = c
+        cards = list(by_name.values())
     return cards
 
 
@@ -113,7 +140,7 @@ def register(card: CapabilityCard) -> CapabilityCard:
 
     这也是回滚通道——POST 一张已有卡改 traffic_weight，等价于更新一行绑定记录。
     """
-    ensure_seed()
+    _maybe_seed_if_empty()
     with SessionLocal() as db:
         row = db.get(Capability, (card.name, card.version))
         if row is None:
@@ -132,7 +159,9 @@ def register(card: CapabilityCard) -> CapabilityCard:
     return card
 
 
-def set_status(name: str, version: str, status: str) -> CapabilityCard | None:
+def set_status(name: str, version: str, status: Status) -> CapabilityCard | None:
+    if status not in ("active", "unhealthy", "retired"):
+        raise ValueError(f"unknown status: {status}")
     with SessionLocal() as db:
         row = db.get(Capability, (name, version))
         if row is None:
@@ -163,16 +192,8 @@ def _stable_hash(trace_id: str) -> int:
     return int(hashlib.sha256(trace_id.encode()).hexdigest()[:16], 16)
 
 
-def route(kind: str, trace_id: str) -> CapabilityCard | None:
-    """在 kind 的 active 卡中按 traffic_weight 加权选一张（确定性，见模块 docstring）。"""
-    _maybe_seed_if_empty()
-    with SessionLocal() as db:
-        rows = db.scalars(
-            select(Capability)
-            .where(Capability.kind == kind, Capability.status == "active")
-            .order_by(Capability.name, Capability.version)
-        ).all()
-        cards = [_row_to_card(r) for r in rows]
+def _weighted_pick(cards: list[CapabilityCard], trace_id: str) -> CapabilityCard | None:
+    """确定性加权选卡：stable_hash(trace_id) % Σweights 落入的累计区间。"""
     total = sum(c.traffic_weight for c in cards)
     if total <= 0:
         return None
@@ -185,6 +206,22 @@ def route(kind: str, trace_id: str) -> CapabilityCard | None:
     return cards[-1]  # 理论不可达（防御性兜底）
 
 
+def _active_cards(where: tuple) -> list[CapabilityCard]:
+    _maybe_seed_if_empty()
+    with SessionLocal() as db:
+        rows = db.scalars(
+            select(Capability)
+            .where(*where, Capability.status == "active")
+            .order_by(Capability.name, Capability.version)
+        ).all()
+        return [_row_to_card(r) for r in rows]
+
+
+def route(kind: str, trace_id: str) -> CapabilityCard | None:
+    """在 kind 的 active 卡中按 traffic_weight 加权选一张（确定性，见模块 docstring）。"""
+    return _weighted_pick(_active_cards((Capability.kind == kind,)), trace_id)
+
+
 def route_required(kind: str, trace_id: str) -> CapabilityCard:
     card = route(kind, trace_id)
     if card is None:
@@ -192,3 +229,48 @@ def route_required(kind: str, trace_id: str) -> CapabilityCard:
             f"no routable '{kind}' capability: 未注册 / 心跳摘除 / 权重全 0"
         )
     return card
+
+
+def route_name(name: str, trace_id: str) -> CapabilityCard | None:
+    """在指定 name 的 active 卡中加权选一张。
+
+    供主链路闸门使用（solver/matrix/verifier 各自 name）——按 kind 桶选会误把
+    同 kind 的无关卡当闸门（如再注册一张 tool 卡即掩盖 matrix 摘除）。
+    """
+    return _weighted_pick(_active_cards((Capability.name == name,)), trace_id)
+
+
+def route_name_required(name: str, trace_id: str) -> CapabilityCard:
+    card = route_name(name, trace_id)
+    if card is None:
+        raise CapabilityUnavailableError(
+            f"no routable '{name}' capability: 未注册 / 心跳摘除 / 权重全 0"
+        )
+    return card
+
+
+def policy_view(name: str) -> dict:
+    """§7.4 版本策略的当前事实视图（pinned | canary | off + latest 版本号）。
+
+    pinned = 权重全量绑定单一版本（回滚即重新 pin）；canary = 多版本分权重灰度；
+    off = 无承接版本。latest 一栏始终给出该 name 版本序最高的 active 卡，
+    新卡以权重 0 注册、由人放量——保守默认，不自动切 latest。
+    """
+    cards = _active_cards((Capability.name == name,))
+    total = sum(c.traffic_weight for c in cards)
+    if not cards or total <= 0:
+        policy = "off"
+    elif sum(1 for c in cards if c.traffic_weight > 0) == 1:
+        policy = "pinned"
+    else:
+        policy = "canary"
+    latest = max((c.version for c in cards), key=version_key, default=None)
+    return {
+        "name": name,
+        "policy": policy,
+        "latest": latest,
+        "versions": [
+            {"version": c.version, "weight": c.traffic_weight,
+             "status": c.status} for c in cards
+        ],
+    }

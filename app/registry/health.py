@@ -1,6 +1,9 @@
 """能力心跳健康检查（§7.4：30 秒心跳、失败自动摘除、恢复自动回切）。
 
-绑定全部**确定性、不外呼**：solver = 微缩自检求解；matrix = 数据集加载；
+分发依据是**卡内 healthcheck 字段的 type**（§9 DDL 该列的用途本体）——动态注册
+的卡只要用已知 type 即自动纳入心跳，不依赖代码里按 (name, version) 硬编码。
+
+检查全部**确定性、不外呼**：solver = 微缩自检求解；matrix = 数据集加载；
 verifier = 已知空行程校验；llm_adapter = 配置在场（CI 哨兵 key 下如实显示
 unhealthy——与 chat 主链路「无 LLM 则降级」的行为一致）。
 
@@ -14,72 +17,91 @@ import asyncio
 import datetime as dt
 from collections.abc import Callable
 
+from app.config import get_settings
 from app.db.repository import get_repository
 from app.llm.adapter import llm_available
 from app.registry import service
+from app.registry.cards import CapabilityCard
 from app.registry.seed import SOLVER_VERSIONS
 from app.solver.routing import SolveRequest, solve_plan
 from app.verifier.verify import DayClaim, VerifyRequest, verify_itinerary
 
-HEARTBEAT_INTERVAL_S = 30.0  # §7.4「30 秒心跳」（运行值可经 REGISTRY_HEARTBEAT_INTERVAL_S 覆盖）
+CheckFn = Callable[[], None]
+# healthcheck.type -> 检查工厂（按卡构造，便于携带 version 等卡内参数）
+HealthcheckFactory = Callable[[CapabilityCard], CheckFn]
 
 
 def heartbeat_interval_s() -> float:
-    from app.config import get_settings
-
+    """§7.4 默认 30s；可经 REGISTRY_HEARTBEAT_INTERVAL_S 覆盖（测试停表防竞态）。"""
     return get_settings().registry_heartbeat_interval_s
+
+
+def solver_check(card: CapabilityCard) -> CheckFn:
+    """微缩自检：真实数据集 1 日无必去求解必须 solved（全链路 ~ms 级）。"""
+    params = SOLVER_VERSIONS.get(card.version)
+    if params is None:
+        # 与路由口径一致：卡存在但参数未收录 = 配置不完整，视为不健康
+        raise RuntimeError(f"solver@{card.version} 无参数绑定（SOLVER_VERSIONS 未收录）")
+
+    def _check() -> None:
+        repo = get_repository()
+        req = SolveRequest(
+            days=1, budget=5000, daily_minutes_cap=480,
+            must_visit=frozenset(), preferences=frozenset(),
+            start_date=dt.date.today(),
+        )
+        result = solve_plan(repo, req, params)
+        if result.status != "solved":
+            raise RuntimeError(f"self-test solve status={result.status}")
+
+    return _check
+
+
+def matrix_check(_card: CapabilityCard) -> CheckFn:
+    def _check() -> None:
+        repo = get_repository()  # 加载即校验（pydantic 严格 schema + 矩阵一致性）
+        if not repo.pois:
+            raise RuntimeError("repository loaded but has no POIs")
+
+    return _check
+
+
+def verifier_check(_card: CapabilityCard) -> CheckFn:
+    """已知用例：空行程 + 宽约束必须零冲突（校验器能跑且不误报）。"""
+    def _check() -> None:
+        repo = get_repository()
+        result = verify_itinerary(
+            repo,
+            VerifyRequest(
+                days=1, budget=10_000, daily_minutes_cap=480,
+                must_visit=frozenset(), start_date=dt.date.today(),
+            ),
+            [DayClaim(date_index=0, depart_min=540, stops=())],
+        )
+        if result.violations:
+            raise RuntimeError(
+                f"known-good case reported: {[v.type for v in result.violations]}")
+
+    return _check
+
+
+def llm_check(_card: CapabilityCard) -> CheckFn:
+    def _check() -> None:
+        if not llm_available():
+            raise RuntimeError("llm adapter not configured (key/base_url 缺失或为测试哨兵)")
+
+    return _check
+
+
+HEALTHCHECK_BINDINGS: dict[str, HealthcheckFactory] = {
+    "self_test_solve": solver_check,
+    "repository_load": matrix_check,
+    "known_case_verify": verifier_check,
+    "config_present": llm_check,
+}
 
 # ref(name@version) -> {checked_at, ok, detail}；进程内存，重启即空
 _last_checked: dict[str, dict] = {}
-
-
-def _check_solver(version: str) -> None:
-    """微缩自检：真实数据集 1 日无必去求解必须 solved（全链路 ~ms 级）。"""
-    repo = get_repository()
-    req = SolveRequest(
-        days=1, budget=5000, daily_minutes_cap=480,
-        must_visit=frozenset(), preferences=frozenset(),
-        start_date=dt.date.today(),
-    )
-    result = solve_plan(repo, req, SOLVER_VERSIONS[version])
-    if result.status != "solved":
-        raise RuntimeError(f"self-test solve status={result.status}")
-
-
-def _check_matrix() -> None:
-    repo = get_repository()  # 加载即校验（pydantic 严格 schema + 矩阵一致性）
-    if not repo.pois:
-        raise RuntimeError("repository loaded but has no POIs")
-
-
-def _check_verifier() -> None:
-    """已知用例：空行程 + 宽约束必须零冲突（校验器能跑且不误报）。"""
-    repo = get_repository()
-    result = verify_itinerary(
-        repo,
-        VerifyRequest(
-            days=1, budget=10_000, daily_minutes_cap=480,
-            must_visit=frozenset(), start_date=dt.date.today(),
-        ),
-        [DayClaim(date_index=0, depart_min=540, stops=())],
-    )
-    if result.violations:
-        raise RuntimeError(f"known-good case reported: {[v.type for v in result.violations]}")
-
-
-def _check_llm() -> None:
-    if not llm_available():
-        raise RuntimeError("llm adapter not configured (key/base_url 缺失或为测试哨兵)")
-
-
-# (name, version) -> 健康检查绑定；动态注册且无绑定的卡不参与心跳（信息卡）
-BINDINGS: dict[tuple[str, str], Callable[[], None]] = {
-    ("solver", "v1"): lambda: _check_solver("v1"),
-    ("solver", "v2"): lambda: _check_solver("v2"),
-    ("matrix", "static"): _check_matrix,
-    ("verifier", "v1"): _check_verifier,
-    ("llm_adapter", "deepseek"): _check_llm,
-}
 
 
 def run_heartbeat() -> dict[str, dict]:
@@ -90,15 +112,16 @@ def run_heartbeat() -> dict[str, dict]:
     now = dt.datetime.now(dt.UTC).isoformat(timespec="milliseconds")
     results: dict[str, dict] = {}
     for card in service.list_cards(include_retired=False):
-        binding = BINDINGS.get((card.name, card.version))
-        if binding is None:
+        factory = HEALTHCHECK_BINDINGS.get(card.healthcheck.get("type"))
+        if factory is None:
             results[card.ref] = {
                 "checked_at": now, "ok": None,
-                "detail": "no binding（动态信息卡，不参与心跳）", "status": card.status,
+                "detail": f"unknown healthcheck type: {card.healthcheck.get('type')}",
+                "status": card.status,
             }
             continue
         try:
-            binding()
+            factory(card)()
             ok, detail = True, ""
         except Exception as e:  # noqa: BLE001 —— 心跳把失败原因原样带回
             ok, detail = False, f"error: {e}"
