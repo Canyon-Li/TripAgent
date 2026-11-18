@@ -4,7 +4,7 @@
 
 - 设计文档：[project.md](project.md)（含 ADR 决策记录、API 契约、数据模型）
 - 总体架构：[architecture.svg](architecture.svg)
-- 任务清单：[TASKS.md](TASKS.md)（阶段 0–3）
+- 任务清单：[TASKS.md](TASKS.md)（阶段 0–4）
 
 ## 快速上手
 
@@ -70,6 +70,27 @@ curl -X POST http://localhost:8000/api/eval/run -H "Content-Type: application/js
 curl "http://localhost:8000/api/eval/reports"
 ```
 
+平台化：注册发现与灰度回滚（阶段 4，§7.4 / ADR-007）：
+
+```bash
+# 能力卡与心跳状态（solver v1/v2、matrix、verifier、llm_adapter，30s 心跳摘除/回切）：
+curl "http://localhost:8000/api/registry/capabilities"
+curl "http://localhost:8000/api/registry/health"
+# 灰度：solver v2 权重 0→100（SQLite 存绑定，路由时读取）——下一次 /api/plan 即生效：
+curl -X POST http://localhost:8000/api/registry/capabilities/solver/v2/weight \
+  -H "Content-Type: application/json" -d '{"weight": 100}'
+# 回滚 = 改回一行（不重启进程）：
+curl -X POST http://localhost:8000/api/registry/capabilities/solver/v2/weight \
+  -H "Content-Type: application/json" -d '{"weight": 0}'
+# 验证路由版本：跑一次规划看 spans（solver.solve 的 meta.solver_version / registry.route 段）：
+curl -X POST http://localhost:8000/api/plan -H "Content-Type: application/json" \
+  -d '{"city":"beijing","days":3,"hotel":"wangfujing","budget":10000,"daily_minutes_cap":480,"must_visit":["forbidden_city"],"preferences":["history"],"session_id":"reg-demo"}'
+# 只读 Agent Card（A2A 风格自描述，discovery-only，ADR-009）：
+curl http://localhost:3000/.well-known/agent.json
+```
+
+前端「能力注册表」视图提供同能力：卡片表格 + 心跳徽标 + 权重编辑 + 灰度预设一键切换。
+
 ## 数据来源与导出日期（§14 授权风险缓解）
 
 | 数据 | 来源 | 导出/校对日期 | 说明 |
@@ -82,20 +103,21 @@ curl "http://localhost:8000/api/eval/reports"
 ## 项目结构（§11.1）
 
 ```
-app/            FastAPI 入口 / 配置 / api（plan·chat·memory·eval·runs·pois）/ db（repository·runs·evals·models）
+app/            FastAPI 入口 / 配置 / api（plan·chat·memory·eval·registry·agent_card·runs·pois）/ db（repository·runs·evals·models）
                 memory（Ledger·Policy·Views·Memory.read）/ llm（适配器·白名单工具）/ runtime（Resolver·Responder·pipeline）
-                solver（VRPTW）/ verifier（独立校验）/ eval（runner·graders·report·baseline_a）；registry 随阶段 4 落地
+                solver（VRPTW，v1/v2 参数化）/ verifier（独立校验）/ eval（runner·graders·report·baseline_a）
+                registry（cards·service·seed·health——能力卡 / 加权路由 / 心跳，§7.4）
 alembic/        schema 迁移（禁止手工改表，§11.4）
-scripts/        export_pois / build_matrix（一次性导出）+ check_plans（plan 用例批量断言）
-web/            静态前端（无构建；行程对话 + 手动规划 + Trace 回放瀑布图 + 评测看板四视图）+ nginx.conf（/api 同源反代）
+scripts/        export_pois / build_matrix（一次性导出）+ check_plans（plan 用例批量断言）+ badcase_to_eval（坏例转用例）
+web/            静态前端（无构建；行程对话 + 手动规划 + Trace 回放瀑布图 + 评测看板 + 能力注册表五视图）+ nginx.conf（/api 与 /.well-known 同源反代）
 data/           pois.json / matrix.json / eval_cases.jsonl（40 条全集，含 20% hidden）/ tripagent.db（库文件不入库）
 reports/        eval-<sha>.md 评测报告 + baseline.json（CI 回归基线）
-tests/          pytest（契约 / 求解 / 校验 / 属性 / 记忆一致性 / 护栏 / 评测等 128 项）
+tests/          pytest（契约 / 求解 / 校验 / 属性 / 记忆一致性 / 护栏 / 评测 / 注册路由 / 心跳故障注入等 169 项）
 ```
 
 ## 环境变量
 
-见 [.env.example](.env.example)，与 project.md §11.2 对齐。
+见 [.env.example](.env.example)，与 project.md §11.2 对齐。其中 `MEMORY_INJECTION=off` 仅评测基线 B 使用（ADR-006，运行时切换见 `app/eval/runner.py` 的 `_with_memory_injection`）。
 
 ## CI
 
@@ -103,4 +125,6 @@ GitHub Actions（[ci.yml](.github/workflows/ci.yml)）：`lint`（ruff）+ `test
 
 ## 状态与路线图
 
-当前：**阶段 3 · 评测观测已完成**（2026-11-17，详见 [TASKS.md](TASKS.md)）——40 条评测全集（32 公开 + 8 hidden，§14 防过拟合）+ 双基线三列报告（ADR-006：current / A 纯 LLM 直出 / B 关记忆注入）+ §12 八指标断言式评分（ADR-004）+ Trace 瀑布图与评测看板前端视图 + CI eval 回归阻断 + 「最近一次可行方案」降级收口（§7.1）。后续：阶段 4 平台化（Registry 灰度回滚 + Agent Card）。
+当前：**阶段 4 · 平台化已完成**（2026-11-18，详见 [TASKS.md](TASKS.md)）——Capability Registry（§7.4：能力卡 SQLite 存权重与版本绑定，路由时读取，**回滚不重启**）+ solver v1/v2 参数化灰度（ADR-007，确定性加权路由）+ 30s 心跳健康检查（失败自动摘除 / 恢复回切，/readyz 联动）+ §15 故障注入测试（LLM 超时降级 / 能力摘除 503 不硬凑 / stale run interrupted 清扫）+ 只读 discovery-only Agent Card（ADR-009，`/.well-known/agent.json`）+ 前端「能力注册表」视图。
+
+至此阶段 0–4 全部完成（§13）；唯一开放项：0.7 的 VPS 部署验证（需真实 VPS 环境）。

@@ -6,6 +6,8 @@
 （LLM 只在 chat 两端出现，此处保持纯结构化入口，便于评测，ADR-001）。
 不可行路径（1.5）：求解无解 / 必去未覆盖 / 校验冲突 → status=infeasible +
 infeasible_reasons，**不返回硬凑的行程**（days 为空）。
+错误路径（阶段 4，§7.5/§15）：能力不可用 → 503 + run 落 failed；
+其他异常 → 500 结构化错误体（code/retryable/message），run 同样落 failed。
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from fastapi import APIRouter, HTTPException
 from app.config import get_settings
 from app.db import runs as runs_db
 from app.db.repository import DataRepository, get_repository
+from app.registry import service as registry_service
 from app.runtime.pipeline import run_plan_pipeline, solver_result_to_claims  # noqa: F401 (re-export)
 from app.schemas import AppliedConstraintsOut, CostOut, PlanRequest, PlanResponse
 
@@ -39,8 +42,6 @@ def _validate_against_dataset(req: PlanRequest, repo: DataRepository) -> None:
 def plan(req: PlanRequest) -> PlanResponse:
     t0 = time.perf_counter()
     settings = get_settings()
-    repo = get_repository()
-    _validate_against_dataset(req, repo)
 
     trace_id = f"tr-{uuid.uuid4().hex[:12]}"
     req.start_date = req.start_date or dt.date.today()
@@ -52,7 +53,26 @@ def plan(req: PlanRequest) -> PlanResponse:
         git_sha=settings.git_sha,
     )
 
-    response = run_plan_pipeline(repo=repo, req=req, trace_id=trace_id)
+    # 统一错误模型（§7.5 / §15）：任何失败 run 落 failed + 结构化错误体，不硬凑行程
+    try:
+        repo = get_repository()
+        _validate_against_dataset(req, repo)
+        response = run_plan_pipeline(repo=repo, req=req, trace_id=trace_id)
+    except HTTPException:
+        runs_db.finish_run(trace_id, "failed", int((time.perf_counter() - t0) * 1000))
+        raise
+    except registry_service.CapabilityUnavailableError as e:
+        runs_db.finish_run(trace_id, "failed", int((time.perf_counter() - t0) * 1000))
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "capability_unavailable", "retryable": True, "message": str(e)},
+        ) from e
+    except Exception as e:  # noqa: BLE001 —— 统一兜底：矩阵加载失败 / 求解崩溃等
+        runs_db.finish_run(trace_id, "failed", int((time.perf_counter() - t0) * 1000))
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "internal_error", "retryable": False, "message": str(e)},
+        ) from e
 
     latency_ms = int((time.perf_counter() - t0) * 1000)
     response.applied_constraints = AppliedConstraintsOut(budget=req.budget)

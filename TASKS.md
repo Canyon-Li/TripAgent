@@ -1,4 +1,4 @@
-# TASKS — 阶段 0–3 任务清单
+# TASKS — 阶段 0–4 任务清单
 
 > 边界依据 `project.md` §0（B1–B17）。勾选即完成；每阶段验收口径写在节末，验收通过即冻结该阶段（§14 范围控制）。阶段 4 清单在阶段 3 冻结后按同样格式拆出。
 
@@ -79,6 +79,24 @@
 
 ---
 
-## 后续阶段（占位，阶段 3 冻结后细化）
+## 阶段 4 · 平台化
 
-- **阶段 4 · 平台化**：Registry、健康检查、solver v1/v2 灰度回滚（ADR-007）、故障注入测试、只读 Agent Card（ADR-009）
+**目标**：Capability Registry（§7.4，SQLite 存权重与版本绑定、路由时读取、回滚不重启）+ 能力级 30 秒心跳健康检查（失败自动摘除）+ solver v1/v2 灰度与一键回滚（ADR-007，差异收敛在 SolverParams 参数层）+ §15 故障注入测试 + 只读 discovery-only Agent Card（ADR-009 / §7.7）。验收口径（§13）：**回滚无需重启；降级路径可用；卡片与 `/api/plan` schema 一致**。
+
+- [x] **4.1 Registry 数据层**：`capabilities` 表（§9 DDL 逐列对齐，PK(name,version)）SQLAlchemy 模型 + Alembic 迁移（down_revision=a4f9c2d81e07）+ 默认能力卡幂等种子（solver@v1/v2、matrix@static、verifier@v1、llm_adapter，§7.1 发现链三件套 + LLM 适配器）；status 语义 `active | unhealthy | retired` ✅ 2026-11-18 迁移 `c5e01a4b7d02`（upgrade 后 PRAGMA 核对 11 列与 §9 一致）；`app/registry/seed.py` 5 张默认卡（solver@v2 权重 0——基线零漂移）；`ensure_seed` 缺行补插、绝不覆写已改行（回滚状态不误复活）
+- [x] **4.2 Registry 服务与求解器路由**：`app/registry/`（card pydantic schema、register/deregister/discover、`traffic_weight` 加权路由、set_weight）；路由确定性（同 trace_id 恒同版本，评测集可断言）；pipeline 经 Registry 选 solver 版本（`registry.route` span + `solver.solve` meta 记版本）；solver v2 = SolverParams 参数化（ADR-007 不分叉代码，默认权重 v2=0 保基线零漂移） ✅ 2026-11-18 加权选卡用 sha256(trace_id)（内置 hash 有进程盐，不可用）；v2 = alpha 0.7 / beta 0.05 / w_score 150 / pref_boost 1.0（高分优先取舍）；pipeline 接缝在 solve 前（§7.1 链路位置），matrix/verifier 单版本卡作可用性闸门；tests 12 项（确定性/回滚/摘除接管/幂等种子）
+- [x] **4.3 心跳健康检查**：各 kind 确定性健康检查绑定（solver 微缩自检求解 / matrix 加载 / verifier 已知用例 / llm 配置在场，均不外呼）；失败自动摘除（status=unhealthy 路由跳过）、恢复自动回切；FastAPI lifespan（种子→首跳→30s 循环→stale run 清扫）；`/readyz` 增 registry 检查（关键 kind ≥1 张 active 卡） ✅ 2026-11-18 `app/registry/health.py` BINDINGS 五绑定（测试直接调 run_heartbeat，interval 可经 `REGISTRY_HEARTBEAT_INTERVAL_S` 停表防竞态）；readyz 摘除场景实测 503；stale run 清扫 `mark_stale_running_interrupted()`（§7.1 优雅关闭闭环）
+- [x] **4.4 Registry API（§10）**：`GET/POST /api/registry/capabilities`（POST=upsert，权重/状态更新即回滚通道——改一行记录不重启）、`GET /api/registry/health`（各能力心跳状态） ✅ 2026-11-18 另加两条 §10 外窄更新辅助端点（`POST .../{name}/{version}/weight|deregister`，只动一个字段避免整卡 upsert 误覆写，同 /api/pois 先例）；tests 6 项
+- [x] **4.5 只读 Agent Card（ADR-009/§7.7）**：`GET /.well-known/agent.json` 静态自描述（discovery-only、无 A2A task 端点、`x-tripagent.requestFields` 由 PlanRequest schema 生成）+ nginx 反代白名单 + §15 契约测试（skills[0].id / 与 /api/plan schema 一致 / scope） ✅ 2026-11-18 `app/api/agent_card.py`（requestFields = list(PlanRequest.model_fields)，真生成非手抄；url 取 request.base_url）；nginx 白名单加 `\.well-known/agent\.json` 且 Host 用 $http_host 透传端口（compose 实测 url=http://localhost:3000/api/plan）；契约 tests 7 项（含「不存在 A2A task 端点」负向断言）
+- [x] **4.6 故障注入测试（§15）**：LLM 超时→规则模板降级；矩阵能力不可用→503 结构化错误 + run 落 failed + 不硬凑行程；solver v1 心跳失败→自动摘除→流量落 v2→恢复回切；stale running run→启动清扫标 interrupted（§7.1）；/api/plan 补统一错误模型（code/retryable/message） ✅ 2026-11-18 `tests/test_fault_injection.py` 7 项：LLM 超时双失败→done.llm.degraded 且行程仍可行；matrix 摘除→readyz 503 + plan 503 `capability_unavailable` + run failed + spans 末段 registry.route error；数据层异常→500 `internal_error`；v1 心跳崩溃→摘除→20/20 落 v2→绑定恢复→回切；澄清路径不受摘除影响
+- [x] **4.7 前端 Registry 视图**：第五 tab——能力卡表格（版本/状态/权重/心跳徽标）+ 权重编辑 + 一键灰度/回滚预设 + 触发规划在瀑布图看 solver 版本切换 ✅ 2026-11-18 浏览器实测（Playwright）：卡片表 5 行 + 心跳摘要（30s · 健康 5）；灰度预设点击后探针路由 v1（目标 7882）→ v2 全量后探针路由 v2（目标 12142，取舍差异可见）；瀑布图 span 标签「能力路由 → 求解 → 独立校验」；页面零 JS 错误
+- [x] **4.8 灰度评测断言（ADR-007）**：公开 plan 种子集强制 v2 全量跑 graders 全绿（硬约束不破坏）+ 至少一例 objective/visited 与 v1 不同（证明确有取舍差异） ✅ 2026-11-18 `tests/test_gray_release.py` 3 项：v2 权重 100 下公开 plan 集全过 grade_plan_case；3 日探针 v1/v2 的 objective 与 visited 差异断言（meta.solver_version 核验路由真实指向）；默认权重 10 trace 恒 v1（CI 确定性）
+- [x] **4.9 文档回写与一致性验收**：README 阶段 4 块 + 测试数修正 + `MEMORY_INJECTION` 补表（audit P1-1/P2-2）；project.md §11.2/§13 状态/日期回填（P2-2/P3-1）；pyproject ruff `extend-exclude=["alembic/versions"]`（P2-1）；pytest 全绿 + ruff clean + check_plans + eval `--ci` exit 0 + compose 冒烟 + 浏览器实测 ✅ 2026-11-18 audit 六条建议全部收口（README 测试数 169、MEMORY_INJECTION/REGISTRY_HEARTBEAT_INTERVAL_S 补 .env.example 与 §11.2、project.md 日期、ruff 全仓口径 exit 0）；pytest 169 绿（133 既有零回归 + 36 新增）+ ruff clean + check_plans 32/32 + eval --ci exit 0（current 1.000 / B 0.844，基线对比通过）+ compose 冒烟（healthz/readyz 含 registry 检查/agent.json 经 3000 反代）+ 灰度→回滚 curl 全程演示（默认 v1 → v2 全量 → 回滚 v1 → 80/20 混合 7:3，零重启）
+
+**验收**：改 `traffic_weight` 后下一次 `/api/plan` 即切版本（不重启进程，span 可见）；心跳失败能力被摘除、恢复后自动回切、降级路径不硬凑；`/.well-known/agent.json` 与 `/api/plan` 请求 schema 字段一致且声明 discovery-only；`pytest -q` 全绿 + ruff clean + `check_plans` 全过 + eval `--ci` exit 0；浏览器出示 Registry 灰度回滚操作（§16 证据）。　✅ 2026-11-18 全过：compose 环境实测权重改行→请求即切版本（registry.route/solver.solve meta 双核验），回滚仅一行记录零重启；v1 心跳失败摘除→流量 20/20 落 v2→恢复回切（tests 复现）；降级三路（LLM 规则模板 / 能力 503 不硬凑 / 最近可行方案——阶段 3.4）均可用；agent card 契约 7 测试含字段一致性与 task 端点负向断言；pytest 169 + ruff 双口径 + check_plans 32/32 + eval --ci exit 0；浏览器（Playwright）实测第五视图操作与瀑布版本标注。**阶段 4 冻结。**
+
+---
+
+## 后续（阶段 4 冻结后）
+
+- 0.7 尾项：VPS 部署验证（需真实 VPS 环境，届时与公开 demo URL 一并收口）

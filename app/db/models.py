@@ -1,5 +1,5 @@
 """数据表模型（§9 DDL）：runs / spans（阶段 0）+ memory_events / memory_views（阶段 2）
-+ eval_results（阶段 3）。"""
++ eval_results（阶段 3）+ capabilities（阶段 4 Registry）。"""
 
 from __future__ import annotations
 
@@ -94,3 +94,27 @@ class EvalResult(Base):
     passed: Mapped[int] = mapped_column(Integer, nullable=False)
     value: Mapped[float | None] = mapped_column(Float)
     created_at: Mapped[str] = mapped_column(String, nullable=False)  # UTC ISO-8601
+
+
+class Capability(Base):
+    """能力卡（§7.4 Registry / §9）：一行 = 一个可路由能力版本。
+
+    灰度权重与版本绑定存 SQLite、路由时读取——回滚只需更新一行记录（不重启，
+    §7.4「回滚不重启」）。status：active（可路由）| unhealthy（心跳失败自动摘除，
+    恢复自动回切）| retired（注销归档，不物理删除）。
+    """
+
+    __tablename__ = "capabilities"
+
+    name: Mapped[str] = mapped_column(String, primary_key=True)
+    version: Mapped[str] = mapped_column(String, primary_key=True)
+    # tool | solver | verifier | llm_adapter（§9）
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    input_schema: Mapped[str] = mapped_column(Text, nullable=False)   # JSON 字符串
+    output_schema: Mapped[str] = mapped_column(Text, nullable=False)  # JSON 字符串
+    endpoint: Mapped[str] = mapped_column(String, nullable=False)
+    healthcheck: Mapped[str] = mapped_column(Text, nullable=False)    # 健康检查定义
+    cost_estimate: Mapped[float | None] = mapped_column(Float)
+    tags: Mapped[str] = mapped_column(Text, nullable=False)           # 逗号分隔
+    status: Mapped[str] = mapped_column(String, nullable=False, default="active")
+    traffic_weight: Mapped[int] = mapped_column(Integer, nullable=False, default=100)

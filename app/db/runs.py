@@ -86,6 +86,22 @@ def finish_run(
         db.commit()
 
 
+def mark_stale_running_interrupted() -> int:
+    """启动清扫（§7.1 优雅关闭语义）：上一进程遗留的 running run 标 interrupted。
+
+    返回清扫条数。重启后这些 run 不再挂在 running——「可续跑」由客户端携
+    原语义重新发起（chat 无服务端续跑状态机，B16 协议边界）。
+    """
+    with SessionLocal() as db:
+        stale = db.scalars(select(Run).where(Run.status == "running")).all()
+        now = _now_iso()
+        for run in stale:
+            run.status = "interrupted"
+            run.finished_at = now
+        db.commit()
+        return len(stale)
+
+
 def add_span(
     trace_id: str,
     name: str,

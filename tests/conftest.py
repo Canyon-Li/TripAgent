@@ -17,6 +17,8 @@ os.environ["DATABASE_URL"] = f"sqlite:///{(_TMP / 'test.db').as_posix()}"
 os.environ["LLM_API_KEY"] = "test-only-never-call"
 os.environ["LLM_BASE_URL"] = "http://llm.invalid.test"
 os.environ["LLM_MODEL"] = "test-model"
+# 心跳循环停表（首跳仍执行，确定性）：会话内 30s 周期跳会与改权重/摘除断言竞态
+os.environ["REGISTRY_HEARTBEAT_INTERVAL_S"] = "3600"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
