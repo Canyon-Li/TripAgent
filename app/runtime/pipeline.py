@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import time
 
 from app.db import runs as runs_db
@@ -63,13 +64,16 @@ def run_plan_pipeline(
     不可行路径（TASKS 1.5）：no_solution / 必去未覆盖 / 校验冲突 → infeasible
     + infeasible_reasons，days 恒为空，不硬凑行程。cost 由调用方按全链路耗时填。
     """
+    # start_date 局部收窄：/api/plan 已填充默认值，chat 侧可能未填（类型上可空）
+    start_date = req.start_date or dt.date.today()
+
     solve_req = SolveRequest(
         days=req.days,
         budget=req.budget,
         daily_minutes_cap=req.daily_minutes_cap,
         must_visit=frozenset(req.must_visit),
         preferences=frozenset(req.preferences),
-        start_date=req.start_date,
+        start_date=start_date,
     )
 
     # ---- Registry 路由（§7.1：Memory.read 之后、Solver.solve 之前）----
@@ -136,7 +140,7 @@ def run_plan_pipeline(
             budget=req.budget,
             daily_minutes_cap=req.daily_minutes_cap,
             must_visit=solve_req.must_visit,
-            start_date=req.start_date,
+            start_date=start_date,
         )
         verification_raw = verify_itinerary(
             repo, verify_req, solver_result_to_claims(result.days)
@@ -168,7 +172,8 @@ def run_plan_pipeline(
                     date_index=d.date_index,
                     date=d.date,
                     depart=format_hhmm(d.depart_min),
-                    return_=format_hhmm(d.return_min),
+                    # pydantic alias 字段（return 是关键字，序列化别名），mypy 无插件视角不识别
+                    return_=format_hhmm(d.return_min),  # type: ignore[call-arg]
                     away_minutes=d.away_minutes,
                     stops=[
                         StopOut(

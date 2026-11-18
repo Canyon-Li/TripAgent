@@ -111,7 +111,7 @@ scripts/        export_pois / build_matrix（一次性导出）+ check_plans（p
 web/            静态前端（无构建；行程对话 + 手动规划 + Trace 回放瀑布图 + 评测看板 + 能力注册表五视图）+ nginx.conf（/api 与 /.well-known 同源反代）
 data/           pois.json / matrix.json / eval_cases.jsonl（40 条全集，含 20% hidden）/ tripagent.db（库文件不入库）
 reports/        eval-<sha>.md 评测报告 + baseline.json（CI 回归基线）
-tests/          pytest（契约 / 求解 / 校验 / 属性 / 记忆一致性 / 护栏 / 评测 / 注册路由 / 心跳故障注入等 169 项）
+tests/          pytest（契约 / 求解 / 校验 / 属性 / 记忆一致性 / 护栏 / 评测 / 注册路由 / 心跳故障注入 / 文档同步等 184 项）
 ```
 
 ## 环境变量
@@ -120,7 +120,7 @@ tests/          pytest（契约 / 求解 / 校验 / 属性 / 记忆一致性 / �
 
 ## CI
 
-GitHub Actions（[ci.yml](.github/workflows/ci.yml)）：`lint`（ruff）+ `test`（pytest，迁移后运行）+ `eval`（公开集 FakeLLM 确定性回归，对比 `reports/baseline.json`——硬约束类指标任一退化或 final_pass_rate 降 >2pp 即失败，§12）；main 分支保护要求 PR 必过这三项检查（复核：`gh api repos/Canyon-Li/TripAgent/branches/main/protection --jq .required_status_checks.contexts` → `["test","lint","eval"]`）。
+GitHub Actions（[ci.yml](.github/workflows/ci.yml)）：`lint`（ruff）+ `typecheck`（mypy，宽松起步）+ `test`（pytest，迁移后运行；含 README 测试计数同步断言）+ `eval`（公开集 FakeLLM 确定性回归，对比 `reports/baseline.json`——硬约束类指标任一退化或 final_pass_rate 降 >2pp 即失败，§12）；main 分支保护要求 PR 必过这四项检查（复核：`gh api repos/Canyon-Li/TripAgent/branches/main/protection --jq .required_status_checks.contexts` → `["test","lint","typecheck","eval"]`）。
 
 ## 状态与路线图
 

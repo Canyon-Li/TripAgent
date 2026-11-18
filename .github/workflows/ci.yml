@@ -1,5 +1,5 @@
-# CI（TASKS 0.8 / 3.8 / B8）：pytest + lint + eval 回归，PR 必过
-# （main 分支保护必需检查 test / lint / eval）
+# CI（TASKS 0.8 / 3.8 / B8）：pytest + lint + typecheck + eval 回归，PR 必过
+# （main 分支保护必需检查 test / lint / typecheck / eval）
 name: ci
 
 on:
@@ -20,6 +20,21 @@ jobs:
         run: pip install ruff
       - name: Lint
         run: ruff check app tests scripts alembic/env.py
+
+  # 2026-11-18 retro：心跳工厂签名 bug 本可被类型检查当场抓住——宽松起步
+  # （不强制注解全覆盖），配置见 pyproject [tool.mypy]
+  typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install mypy
+        run: pip install mypy
+      - name: Type check
+        run: mypy app
 
   test:
     runs-on: ubuntu-latest

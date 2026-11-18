@@ -112,7 +112,8 @@ def run_heartbeat() -> dict[str, dict]:
     now = dt.datetime.now(dt.UTC).isoformat(timespec="milliseconds")
     results: dict[str, dict] = {}
     for card in service.list_cards(include_retired=False):
-        factory = HEALTHCHECK_BINDINGS.get(card.healthcheck.get("type"))
+        hc_type = card.healthcheck.get("type")
+        factory = HEALTHCHECK_BINDINGS.get(hc_type) if isinstance(hc_type, str) else None
         if factory is None:
             results[card.ref] = {
                 "checked_at": now, "ok": None,
