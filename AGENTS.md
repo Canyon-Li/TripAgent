@@ -1,11 +1,12 @@
 # AGENTS.md
 
-环境事实指针（权威细节看 README / project.md，本文件只记「不写在别处会踩坑」的）：
+环境事实指针（权威细节看 README / project.md / TASKS.md，本文件只记「不写在别处会踩坑」的）：
 
-- **Python / pytest**：venv 在主仓库根 `.venv`（GitHub worktree 不自带）；跑法 `"/d/Desktop/Code/TripAgent/.venv/Scripts/python.exe" -m pytest -q`。pytest `pythonpath=["."]` 已配置——裸 `pytest` 与 `python -m pytest` 等价（历史上不等价，别依赖 cwd 注入）。
-- **真实 LLM 跑数**：`.env` 不入库、不随 worktree 出现；需要真 key 时从主仓复制 `cp /d/Desktop/Code/TripAgent/.env .`（保持 gitignored）。
-- **评测 / 演示命令**：eval runner、check_plans、badcase_to_eval 的权威用法在 README「评测与观测」节。
-- **浏览器自动化**：browser-use 插件在 worktree 会话报 "Request workspace is not owned by this CLI"，不可用；fallback = 系统 Python（`D:\Python3-14\python.exe`，已装 playwright）+ `executable_path` 指向 `%LOCALAPPDATA%\ms-playwright\chromium-1228\chrome-win64\chrome.exe`（版本必须与已安装目录匹配，`playwright install` 可能装出另一个版本号）。
-- **本地演示端口**：web 8890（静态目录）/ api 8002；8000 常被遗留实例占用，起服务前先探测。
-- **合并流程**（个人项目约定，2026-11-18 定）：日常修复开 feature 分支 → 本地 `git merge --no-ff` → push main——main 保护的必需检查只拦 PR 路径，不拦直推，push 后 CI 照跑（事后门禁）；仅阶段收口等留档节点开 PR。勿为小修走 PR。
-- **GitHub push 闪断**：22 端口 SSH 与 https 直连的 TLS 都可能被链路掐断（gh CLI 不受影响）；绕行 `git push ssh://git@ssh.github.com:443/Canyon-Li/TripAgent.git <ref>:<ref>`。
+- **Python / pytest**：venv 在主仓库根 `.venv`（GitHub worktree 不自带）；跑法 `"/d/Desktop/Code/TripAgent/.venv/Scripts/python.exe" -m pytest -q`。
+- **装 Python 包**：venv 无 pip，用 `uv pip install --python .venv <pkg>`；直连 pypi 的 TLS 可能被链路掐断，加 `UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/`。
+- **真实 LLM 跑数**：`.env` 不随 worktree 出现；需要真 key 时从主仓复制 `cp /d/Desktop/Code/TripAgent/.env .`。
+- **评测 / 演示命令**：eval runner、check_plans、badcase_to_eval 用法见 README「评测与观测」等节与脚本 docstring。
+- **浏览器自动化**：browser-use 插件在 worktree 会话报 "Request workspace is not owned by this CLI"；改用系统 Python（`D:\Python3-14\python.exe`，已装 playwright）+ `executable_path` 指向 `%LOCALAPPDATA%\ms-playwright\chromium-1228\chrome-win64\chrome.exe`（版本须与已装目录匹配，`playwright install` 可能装出别的版本号）。
+- **本地起服务**：端口以 docker-compose.yml 为准；8000 常被遗留 uvicorn 实例占用，起前先探测。
+- **合并流程**（个人项目约定）：日常修复开 feature 分支 → **commit message需要简明易懂，且依照 Conventional Commits。merge 前先向作者出示完整 commit message 与改动清单，确认后才merge** `git merge --no-ff` → push main（main 保护只拦 PR、不拦直推，CI 事后照跑）；仅阶段收口等留档节点开 PR。
+- **GitHub push 闪断**：SSH 22 与 https 直连都可能被链路掐断；绕行 `git push ssh://git@ssh.github.com:443/Canyon-Li/TripAgent.git <ref>:<ref>`。
