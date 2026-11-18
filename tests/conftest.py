@@ -38,6 +38,27 @@ def parse_sse(text: str) -> list[tuple[str, dict]]:
     return events
 
 
+@pytest.fixture()
+def default_registry_state():
+    """阶段 4：Registry 默认态（solver v1=100/v2=0、关键卡 active）前后复位。
+
+    session 级 client 与 DB 被跨文件复用——任何改权重/摘状态的测试都应依赖本件。
+    """
+    from app.registry import service
+
+    def _reset() -> None:
+        service.set_weight("solver", "v1", 100)
+        service.set_weight("solver", "v2", 0)
+        service.set_status("solver", "v1", "active")
+        service.set_status("solver", "v2", "active")
+        service.set_status("matrix", "static", "active")
+        service.set_status("verifier", "v1", "active")
+
+    _reset()
+    yield
+    _reset()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _db():
     """session 级建表（与 Alembic 迁移同构）；不依赖 client 的纯 DB 测试也需要。"""

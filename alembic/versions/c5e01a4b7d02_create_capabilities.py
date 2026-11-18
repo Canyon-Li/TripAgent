@@ -24,12 +24,12 @@ def upgrade() -> None:
     sa.Column('name', sa.String(), nullable=False),
     sa.Column('version', sa.String(), nullable=False),
     sa.Column('kind', sa.String(), nullable=False),            # tool | solver | verifier | llm_adapter
-    sa.Column('input_schema', sa.String(), nullable=False),
-    sa.Column('output_schema', sa.String(), nullable=False),
+    sa.Column('input_schema', sa.Text(), nullable=False),
+    sa.Column('output_schema', sa.Text(), nullable=False),
     sa.Column('endpoint', sa.String(), nullable=False),
-    sa.Column('healthcheck', sa.String(), nullable=False),
+    sa.Column('healthcheck', sa.Text(), nullable=False),
     sa.Column('cost_estimate', sa.Float(), nullable=True),
-    sa.Column('tags', sa.String(), nullable=False),
+    sa.Column('tags', sa.Text(), nullable=False),
     sa.Column('status', sa.String(), nullable=False, server_default='active'),
     sa.Column('traffic_weight', sa.Integer(), nullable=False, server_default='100'),
     sa.PrimaryKeyConstraint('name', 'version')

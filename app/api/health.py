@@ -1,7 +1,8 @@
 """/healthz /readyz 探针（§10：返回 version 与 git_sha）。
 
-阶段 4 起 /readyz 增 registry 检查：主链路关键 kind（solver / matrix / verifier）
-各需 ≥1 张 active 卡，否则 not_ready（心跳摘除的降级信号，§7.4 / §15）。
+阶段 4 起 /readyz 增 registry 检查：主链路关键能力（solver / matrix / verifier，
+按 name 与 pipeline 闸门同口径）各需 ≥1 张 active 卡，否则 not_ready
+（心跳摘除的降级信号，§7.4 / §15）。
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from app.registry import service as registry_service
 
 router = APIRouter()
 
-_CRITICAL_KINDS = ("solver", "tool", "verifier")  # matrix 注册为 tool 桶（§9 kind 枚举）
+_CRITICAL_NAMES = ("solver", "matrix", "verifier")
 
 
 @router.get("/healthz")
@@ -25,9 +26,9 @@ def healthz() -> dict:
 
 
 def _registry_check() -> str:
-    missing = [k for k in _CRITICAL_KINDS if not registry_service.discover(kind=k)]
+    missing = [n for n in _CRITICAL_NAMES if registry_service.route_name(n, "readyz") is None]
     if missing:
-        return f"error: no active capability for kind(s): {', '.join(missing)}"
+        return f"error: no active capability for name(s): {', '.join(missing)}"
     return "ok"
 
 

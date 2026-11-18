@@ -41,6 +41,20 @@ def test_card_matches_plan_request_schema(client: TestClient):
     # 反向兜底：schema 变了卡片没变 → 此处失败（守住「生成」而非手抄）
 
 
+def test_card_fields_match_live_openapi_schema(client: TestClient):
+    """对照**独立来源**（服务端 OpenAPI 里 /api/plan 实际引用的 PlanRequest schema）。
+
+    不与卡端同源常量比较——解 requestBody 的 $ref 取 properties，两端各走各的
+    生成路径，任何一端漂移都会在此失败（§15 契约测试的真实语义）。
+    """
+    spec = client.get("/openapi.json").json()
+    request_body = spec["paths"]["/api/plan"]["post"]["requestBody"]
+    ref = request_body["content"]["application/json"]["schema"]["$ref"]
+    assert ref == "#/components/schemas/PlanRequest"
+    schema_props = spec["components"]["schemas"]["PlanRequest"]["properties"]
+    assert set(_card(client)["x-tripagent"]["requestFields"]) == set(schema_props)
+
+
 def test_card_is_discovery_only_no_a2a_task(client: TestClient):
     card = _card(client)["x-tripagent"]
     assert card["scope"] == "discovery-only"

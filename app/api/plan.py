@@ -53,22 +53,27 @@ def plan(req: PlanRequest) -> PlanResponse:
         git_sha=settings.git_sha,
     )
 
+    def _fail_run() -> int:
+        latency = int((time.perf_counter() - t0) * 1000)
+        runs_db.finish_run(trace_id, "failed", latency)
+        return latency
+
     # 统一错误模型（§7.5 / §15）：任何失败 run 落 failed + 结构化错误体，不硬凑行程
     try:
         repo = get_repository()
         _validate_against_dataset(req, repo)
         response = run_plan_pipeline(repo=repo, req=req, trace_id=trace_id)
     except HTTPException:
-        runs_db.finish_run(trace_id, "failed", int((time.perf_counter() - t0) * 1000))
+        _fail_run()
         raise
     except registry_service.CapabilityUnavailableError as e:
-        runs_db.finish_run(trace_id, "failed", int((time.perf_counter() - t0) * 1000))
+        _fail_run()
         raise HTTPException(
             status_code=503,
             detail={"code": "capability_unavailable", "retryable": True, "message": str(e)},
         ) from e
     except Exception as e:  # noqa: BLE001 —— 统一兜底：矩阵加载失败 / 求解崩溃等
-        runs_db.finish_run(trace_id, "failed", int((time.perf_counter() - t0) * 1000))
+        _fail_run()
         raise HTTPException(
             status_code=500,
             detail={"code": "internal_error", "retryable": False, "message": str(e)},

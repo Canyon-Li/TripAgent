@@ -34,12 +34,8 @@ def _plan_cases() -> list[PlanCase]:
 
 
 @pytest.fixture(autouse=True)
-def _restore_weights():
-    service.set_weight("solver", "v1", 100)
-    service.set_weight("solver", "v2", 0)
+def _restore_weights(default_registry_state):
     yield
-    service.set_weight("solver", "v1", 100)
-    service.set_weight("solver", "v2", 0)
 
 
 def test_v2_full_takeover_passes_public_plan_cases(client: TestClient):
