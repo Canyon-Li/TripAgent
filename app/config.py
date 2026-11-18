@@ -61,6 +61,8 @@ class Settings:
     log_level: str
     # 基线 B 开关（ADR-006：完整管线关闭记忆注入；on/off）
     memory_injection: bool
+    # Registry 心跳间隔秒（§7.4 默认 30；测试会话停表防与状态断言竞态）
+    registry_heartbeat_interval_s: float
     # 版本可追溯（§11.4：/healthz 返回 version + git_sha）
     version: str
     git_sha: str
@@ -85,6 +87,7 @@ def get_settings() -> Settings:
         log_level=val("LOG_LEVEL", "INFO"),
         memory_injection=val("MEMORY_INJECTION", "on").strip().lower()
         not in {"off", "0", "false", "no"},
+        registry_heartbeat_interval_s=float(val("REGISTRY_HEARTBEAT_INTERVAL_S", "30")),
         version=__version__,
         git_sha=_git_sha(),
     )

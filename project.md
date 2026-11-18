@@ -6,7 +6,7 @@
 | --- | --- |
 | 文档状态 | **Draft / 设计稿（边界已确认，见 §0）**（实现进度见 §13） |
 | 版本 | v0.3.0 |
-| 最后更新 | 2026-11-17 |
+| 最后更新 | 2026-11-18 |
 | 目标读者 | 项目开发者、面试考官、后续维护者 |
 | 关联文件 | `architecture.svg`（总体架构图）、`TASKS.md`（阶段 0–2 任务清单） |
 | 技术栈 | Python 3.11+ / FastAPI / SQLite / OR-Tools / OpenAI-compatible LLM / 静态前端 / Docker Compose |
@@ -536,6 +536,8 @@ AMAP_KEY=                # 仅一次性数据导出脚本使用，运行时不�
 DATABASE_URL=sqlite:///./data/tripagent.db
 EVAL_CASES_PATH=./data/eval_cases.jsonl
 LOG_LEVEL=INFO
+MEMORY_INJECTION=on      # 记忆注入开关（on 默认；off 仅评测基线 B 用，ADR-006）
+REGISTRY_HEARTBEAT_INTERVAL_S=30  # 能力心跳间隔（§7.4 默认 30s；测试会话停表防竞态）
 ```
 
 ### 11.3 运行
@@ -590,7 +592,7 @@ python -m app.eval.runner --baseline
 | **1 最小可跑** | 单城 3 日行程、Routing 求解、独立校验器、行程前端 | 40 条用例中时间窗冲突为 0 | ✅ 完成（2026-11-17）：`POST /api/plan` 全链路（两阶段 VRPTW 求解 + 独立校验器 + runs/spans 贯穿 + 前端行程卡 + nginx 同源反代）；10 条种子用例（含 2 hidden）时间窗冲突 0 / 预算违规 0 / 必去覆盖全过，属性测试 120 组随机样本通过，pytest 37 绿 + ruff clean + compose 冒烟通过（40 条全集随阶段 3 补齐，见 TASKS.md） |
 | **2 记忆层** | Ledger / Views / Policy、多轮一致性演示 | 第 6 轮约束回显正确，可回放 Ledger | ✅ 完成（2026-11-17）：memory_events/memory_views 落地（追加写 + supersedes 归档 + 重放重建）；Memory.read scope 链注入（session→user→global、衰减只影响排序不丢硬约束）；Resolver 白名单 function calling（三工具 + 护栏 + 规则模板降级）；`POST /api/chat` SSE 六段 spans；前端对话视图（用户切换/约束来源徽标）；六轮演进召回 / 跨会话注入 / 用户隔离 / rebuild 一致全过（pytest 106 绿）；任务明细见 `TASKS.md` 阶段 2 |
 | **3 评测观测** | 评测集、Trace Store、看板、CI 回归报告 | 产出改动前后指标对比图 | ✅ 完成（2026-11-17）：40 条全集（32 公开 + 8 hidden，chat 多轮内嵌脚本）+ 双基线三列报告（ADR-006，current 0.975 / A 0.000 / B 0.800）+ §12 八指标真实回填 + Trace 瀑布图与评测看板前端视图 + CI `eval` 回归 job（baseline.json 对比，分支保护 test/lint/eval）+「最近一次可行方案」降级收口；报告 [reports/eval-7731d7c.md](reports/eval-7731d7c.md)，任务明细见 `TASKS.md` 阶段 3 |
-| **4 平台化** | Registry、健康检查、灰度回滚、故障注入测试、只读 Agent Card 导出 | 回滚无需重启；降级路径可用；卡片与 `/api/plan` schema 一致 | 待开始 |
+| **4 平台化** | Registry、健康检查、灰度回滚、故障注入测试、只读 Agent Card 导出 | 回滚无需重启；降级路径可用；卡片与 `/api/plan` schema 一致 | **已完成**（2026-11-18：`capabilities` 表迁移 `c5e01a4b7d02`、5 张默认卡、确定性加权路由、30s 心跳摘除/回切、`/.well-known/agent.json`、pytest 169 绿 + compose 实测灰度→回滚全程不重启） |
 
 > 时间提示：该岗位 2026-09-15 发布、招满即止，10 月起已陆续发放 offer。**优先完成阶段 0–3**，阶段 4 作为加分演示。范围控制遵循 §3.2。
 > 2026-11-17 边界确认（B1/B2）：时间盒 ≥ 1 个月，阶段 0–4 全做，首个里程碑为阶段 1；阶段 0–1 任务清单见 `TASKS.md`。

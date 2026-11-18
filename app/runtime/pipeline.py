@@ -1,8 +1,8 @@
-"""共用规划管线：/api/plan 与 /api/chat 共享的「求解 → 独立校验 → 组装」段落。
+"""共用规划管线：/api/plan 与 /api/chat 共享的「Registry 路由 → 求解 → 独立校验 → 组装」段落。
 
 从 api/plan.py 原地抽取（行为不变，阶段 1 测试保持绿），使 chat 主链路
 （§7.1）与结构化入口走完全相同的确定性路径——LLM 只在两端（Resolver/Responder），
-中间不碰事实（ADR-001）。
+中间不碰事实（ADR-001）。阶段 4 起求解经 Registry 选版本（ADR-007 灰度载体）。
 """
 
 from __future__ import annotations
@@ -11,6 +11,8 @@ import time
 
 from app.db import runs as runs_db
 from app.db.repository import DataRepository, format_hhmm
+from app.registry import service as registry
+from app.registry.seed import SOLVER_VERSIONS
 from app.schemas import (
     AppliedConstraintsOut,
     DayOut,
@@ -70,12 +72,41 @@ def run_plan_pipeline(
         start_date=req.start_date,
     )
 
+    # ---- Registry 路由（§7.1：Memory.read 之后、Solver.solve 之前）----
+    # solver 按 traffic_weight 加权选版本分发参数（ADR-007 灰度载体）；
+    # matrix / verifier 单版本进程内能力，路由结果作为可用性闸门（摘除即 503 不硬凑）。
+    r0 = tick()
+    try:
+        solver_card = registry.route_required("solver", trace_id)
+        matrix_card = registry.route_required("tool", trace_id)
+        verifier_card = registry.route_required("verifier", trace_id)
+    except registry.CapabilityUnavailableError:
+        runs_db.add_span(
+            trace_id, "registry.route", *span_bounds(r0), "error",
+            meta={"error": "no routable capability（心跳摘除或未注册）"},
+        )
+        raise
+    runs_db.add_span(
+        trace_id, "registry.route", *span_bounds(r0), "ok",
+        meta={
+            "solver": solver_card.ref,
+            "matrix": matrix_card.ref,
+            "verifier": verifier_card.ref,
+        },
+    )
+    params = SOLVER_VERSIONS.get(solver_card.version)
+    if params is None:  # 动态注册的未知 solver 版本：有卡无参数绑定，拒绝路由
+        raise registry.CapabilityUnavailableError(
+            f"solver@{solver_card.version} 无参数绑定（SOLVER_VERSIONS 未收录）"
+        )
+
     # ---- 求解 ----
     s0 = tick()
-    result = solve_plan(repo, solve_req)
+    result = solve_plan(repo, solve_req, params)
     runs_db.add_span(
         trace_id, "solver.solve", *span_bounds(s0), "ok",
         meta={
+            "solver_version": solver_card.version,
             "solver_status": result.solver_status,
             "objective": result.objective,
             "phases": result.phases,

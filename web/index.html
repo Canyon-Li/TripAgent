@@ -128,6 +128,7 @@
     <span data-view="plan">手动规划</span>
     <span data-view="trace">Trace 回放</span>
     <span data-view="dash">评测看板</span>
+    <span data-view="reg">能力注册表</span>
   </div>
 
   <!-- ============ 行程对话（阶段 2） ============ -->
@@ -235,9 +236,38 @@
     </div>
   </section>
 
+  <!-- ============ 能力注册表（阶段 4） ============ -->
+  <section id="view-reg" hidden>
+    <div class="card">
+      <div class="chat-bar">
+        <div class="grow">
+          <label>能力卡（capabilities 表：权重与版本绑定存 SQLite，路由时读取）</label>
+        </div>
+        <div><label>&nbsp;</label><button class="ghost" id="reg_refresh">刷新</button></div>
+      </div>
+      <p class="hint">
+        solver v1/v2 以相同接口注册（ADR-007）：改 traffic_weight 即灰度 / 回滚，
+        下一次 /api/plan 立即生效——<strong>不重启进程</strong>（§7.4）。
+        心跳 30s 一跳，失败自动摘除、恢复自动回切。
+      </p>
+      <div id="reg_cards"></div>
+    </div>
+    <div class="card">
+      <div class="chat-bar">
+        <div class="grow"><label>solver 灰度预设（v1 / v2 权重）</label></div>
+        <div><label>&nbsp;</label><button class="ghost" id="reg_preset_v1">v1 全量（100/0）</button></div>
+        <div><label>&nbsp;</label><button class="ghost" id="reg_preset_gray">灰度（80/20）</button></div>
+        <div><label>&nbsp;</label><button class="ghost" id="reg_preset_v2">v2 全量（0/100）</button></div>
+      </div>
+      <button class="primary" id="reg_probe">跑一次规划，验证路由到了哪个版本</button>
+      <div id="reg_probe_out"></div>
+    </div>
+  </section>
+
   <footer>
     API 文档 <a id="docs" href="#">/docs</a> ｜ 探针 <a id="hz" href="#">/healthz</a> ｜
     记忆回放 <a id="memlink" href="#">/api/memory/events</a> ｜
+    Agent Card <a id="cardlink" href="#">/.well-known/agent.json</a> ｜
     数据来源：高德导出 + 人工校对（见 README）
   </footer>
 </div>
@@ -249,6 +279,7 @@ const API_BASE = new URLSearchParams(location.search).get("api") || "";
 document.getElementById("docs").href = API_BASE + "/docs";
 document.getElementById("hz").href = API_BASE + "/healthz";
 document.getElementById("memlink").href = API_BASE + "/api/memory/events";
+document.getElementById("cardlink").href = API_BASE + "/.well-known/agent.json";
 document.getElementById("start_date").value = new Date().toISOString().slice(0, 10);
 
 const CATS = ["history", "food", "nature", "modern", "shopping", "museum", "religion", "landmark"];
@@ -257,7 +288,8 @@ const CAT_NAMES = { history: "历史", food: "美食", nature: "自然", modern:
 const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
 /* ---------------- tab 切换 ---------------- */
-const PANES = { chat: "view-chat", plan: "view-plan", trace: "view-trace", dash: "view-dash" };
+const PANES = { chat: "view-chat", plan: "view-plan", trace: "view-trace", dash: "view-dash",
+                reg: "view-reg" };
 document.querySelectorAll("#views span[data-view]").forEach(t => {
   t.addEventListener("click", () => {
     document.querySelectorAll("#views span").forEach(x => x.classList.remove("active"));
@@ -266,6 +298,7 @@ document.querySelectorAll("#views span[data-view]").forEach(t => {
     document.getElementById(PANES[t.dataset.view]).hidden = false;
     if (t.dataset.view === "dash") loadDash(false);
     if (t.dataset.view === "trace") renderRecentTraces();
+    if (t.dataset.view === "reg") loadRegistry();
   });
 });
 
@@ -551,9 +584,10 @@ refreshSessionChip();
 botNotice("你好！我是 TripAgent。告诉我预算、天数、想去的景点，我会用约束求解器排出可执行的行程，并全程记住你的约束。");
 
 /* ---------------- Trace 回放（阶段 3）：瀑布图 ---------------- */
-const SPAN_LABELS = { "memory.read": "记忆读取", "resolver.resolve": "意图解析",
-                      "memory.write": "约束写回", "solver.solve": "求解",
-                      "verifier.check": "独立校验", "responder.render": "回复渲染" };
+const SPAN_LABELS = { "registry.route": "能力路由", "memory.read": "记忆读取",
+                      "resolver.resolve": "意图解析", "memory.write": "约束写回",
+                      "solver.solve": "求解", "verifier.check": "独立校验",
+                      "responder.render": "回复渲染" };
 const LAST_TRACES = [];
 
 function rememberTrace(id) {
@@ -594,7 +628,7 @@ function traceHtml(run) {
   const t0 = spans.length ? Math.min(...spans.map(s => s.start_ms)) : 0;
   const total = Math.max((spans.length ? Math.max(...spans.map(s => s.end_ms)) : 0) - t0, 1);
   let html = `<div class="card"><h3 style="margin:0 0 10px;font-size:1rem">run ` +
-    `<code>${run.trace_id}</code> 的六段瀑布</h3>` +
+    `<code>${run.trace_id}</code> 的逐段瀑布</h3>` +
     `<p class="meta">状态 ${run.status} ｜ 会话 <code>${run.session_id}</code> ｜ ` +
     `模型 ${run.model ?? "—"} ｜ git ${run.git_sha ?? "—"} ｜ ` +
     `${run.started_at} → ${run.finished_at ?? "…"} ｜ 端到端 ${run.latency_ms ?? "—"}ms ｜ ` +
@@ -734,6 +768,108 @@ function renderDashChart() {
 }
 
 document.getElementById("dash_refresh").addEventListener("click", () => loadDash(true));
+
+/* ---------------- 能力注册表（阶段 4）：卡片 + 灰度/回滚 ---------------- */
+const STATUS_NAME = { active: "active · 可路由", unhealthy: "unhealthy · 已摘除",
+                      retired: "retired · 已注销" };
+const STATUS_CLS = { active: "mem", unhealthy: "bad", retired: "req" };
+
+async function loadRegistry() {
+  const box = document.getElementById("reg_cards");
+  box.innerHTML = '<p class="empty">加载中…</p>';
+  try {
+    const [capsR, hbR] = await Promise.all([
+      fetch(API_BASE + "/api/registry/capabilities"),
+      fetch(API_BASE + "/api/registry/health"),
+    ]);
+    if (!capsR.ok || !hbR.ok) throw new Error("HTTP " + capsR.status + "/" + hbR.status);
+    const caps = (await capsR.json()).capabilities;
+    const hbBody = await hbR.json();
+    const hb = hbBody.capabilities;
+    let html = "<table><tr><th>能力</th><th>类型</th><th>状态</th><th>权重</th><th>心跳</th></tr>";
+    caps.forEach(c => {
+      const ref = c.name + "@" + c.version;
+      const h = hb[ref] || {};
+      const beat = h.checked_at
+        ? (h.ok === true ? "✓" : h.ok === false ? "✗ " + String(h.detail || "").slice(0, 64) : "—")
+        : "尚未心跳";
+      const weight = c.kind === "solver"
+        ? `<input type="number" min="0" max="10000" value="${c.traffic_weight}" ` +
+          `style="width:76px" data-w-ref="${ref}"> ` +
+          `<button class="ghost" style="margin-top:0" data-apply="${ref}">保存</button>`
+        : String(c.traffic_weight);
+      html += `<tr><td><code>${ref}</code><div class="meta">${(c.tags || []).join(" · ")}</div></td>` +
+        `<td>${c.kind}</td>` +
+        `<td><span class="badge ${STATUS_CLS[c.status] || "req"}">${STATUS_NAME[c.status] || c.status}</span></td>` +
+        `<td>${weight}</td><td class="meta">${beat}</td></tr>`;
+    });
+    box.innerHTML = html + "</table>" +
+      `<p class="meta">心跳间隔 ${hbBody.interval_s}s ｜ 健康 ${hbBody.summary.healthy} · ` +
+      `摘除 ${hbBody.summary.unhealthy} · 未知 ${hbBody.summary.unknown}</p>`;
+    box.querySelectorAll("[data-apply]").forEach(btn =>
+      btn.addEventListener("click", async () => {
+        const ref = btn.dataset.apply;  // name@version
+        const [name, version] = ref.split("@");
+        const w = +box.querySelector(`[data-w-ref="${ref}"]`).value;
+        const r = await fetch(`${API_BASE}/api/registry/capabilities/${name}/${version}/weight`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ weight: w }),
+        });
+        if (r.ok) { loadRegistry(); } else { alert("保存失败：" + r.status); }
+      }));
+  } catch (e) {
+    box.innerHTML = `<div class="banner bad">加载失败：${e}（API 未启动？）</div>`;
+  }
+}
+
+async function setSolverWeights(w1, w2) {
+  for (const [v, w] of [["v1", w1], ["v2", w2]]) {
+    const r = await fetch(`${API_BASE}/api/registry/capabilities/solver/${v}/weight`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ weight: w }),
+    });
+    if (!r.ok) { alert("权重更新失败：" + r.status); return; }
+  }
+  loadRegistry();
+}
+
+document.getElementById("reg_refresh").addEventListener("click", loadRegistry);
+document.getElementById("reg_preset_v1").addEventListener("click", () => setSolverWeights(100, 0));
+document.getElementById("reg_preset_gray").addEventListener("click", () => setSolverWeights(80, 20));
+document.getElementById("reg_preset_v2").addEventListener("click", () => setSolverWeights(0, 100));
+
+document.getElementById("reg_probe").addEventListener("click", async () => {
+  const btn = document.getElementById("reg_probe");
+  const out = document.getElementById("reg_probe_out");
+  btn.disabled = true; btn.textContent = "求解中…";
+  out.innerHTML = '<p class="empty">按当前权重路由 → 求解 → 独立校验…</p>';
+  try {
+    const r = await fetch(API_BASE + "/api/plan", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ city: "beijing", days: 3, hotel: "wangfujing", budget: 10000,
+                             daily_minutes_cap: 480, must_visit: ["forbidden_city"],
+                             preferences: ["history"], session_id: "reg-demo" }),
+    });
+    const body = await r.json();
+    if (!r.ok) throw new Error(JSON.stringify(body.detail ?? body).slice(0, 300));
+    const spans = (await (await fetch(API_BASE + "/api/runs/" + body.trace_id)).json()).spans;
+    const routed = (spans.find(s => s.name === "registry.route") || {}).meta || {};
+    const version = ((spans.find(s => s.name === "solver.solve") || {}).meta || {}).solver_version;
+    rememberTrace(body.trace_id);
+    out.innerHTML = `<div class="banner ${body.status === "feasible" ? "ok" : "bad"}">` +
+      `${body.status === "feasible" ? "✓ 可行" : "✗ 不可行"} —— 路由 ` +
+      `<code>${routed.solver ?? "—"}</code> · 求解版本 <strong>${version ?? "—"}</strong>` +
+      ` · 目标 ${body.solver.objective} · ${body.solver.wall_ms}ms</div>` +
+      `<p class="meta">trace <code>${body.trace_id}</code>（可在 Trace 回放视图查看 registry.route 段）· ` +
+      `改权重后再点一次本按钮，观察版本切换——全程无重启</p>` +
+      itineraryHtml(body, body.applied_constraints.budget);
+  } catch (e) {
+    out.innerHTML = `<div class="banner bad">请求失败：${e}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "跑一次规划，验证路由到了哪个版本";
+  }
+});
 
 document.getElementById("dash_run").addEventListener("click", async () => {
   const btn = document.getElementById("dash_run");
