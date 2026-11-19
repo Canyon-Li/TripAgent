@@ -12,7 +12,7 @@
 - [x] **0.4 POI 数据集** `data/pois.json`：高德导出北京 18–30 个 POI（名称/坐标/地址），**人工校对**营业时间、门票、建议时长、评分；每条带 `export_date` 与 `source` ✅ 2026-11-17 `scripts/export_pois.py` 导出 23 个 POI（0 缺失、字段校验通过）；营业时间/门票/时长/评分经作者人工校对（`manual_review` 记录在案，`needs_review` 已清空）
 - [x] **0.5 距离矩阵** `data/matrix.json`：一次性预计算 n×n 耗时（高德驾车优先，OSRM 兜底，B7），含生成脚本 `scripts/build_matrix.py`（可复跑、记录参数）✅ 2026-11-17 24×24（酒店锚点 + 23 POI），高德 v3/distance 全列命中、0 次 OSRM 兜底；产出 minutes/km/fare_cny（出租车启发式，公式在 meta）；抽查 2 组 OD 与 v3/direction/driving 交叉验证一致（18.0↔19 / 36.9↔37，仅 ceil 差）；v5 接口对该 key 不可用（10017），已按 v3 落盘
 - [x] **0.6 服务骨架**：FastAPI 入口 + `/healthz` `/readyz`（返回 version + git_sha）+ Alembic 初始迁移建 `runs` / `spans` 表 ✅ 2026-11-17 uvicorn 实测 `/healthz` 200（version 0.1.0 + git_sha 0515a86）、`/readyz` 200（database ok）；Alembic 迁移 `12cd442bb18f` 建 runs(11 列)/spans(8 列)，与 §9 DDL 一致；SQLite WAL 持久化验证；pytest 2 passed + ruff clean
-- [ ] **0.7 容器化**：`docker-compose.yml`（api / web）+ `.env.example`（对齐 §11.2）+ Windows 本地与 VPS 各验证一次（B4 / B13）　🟡 2026-11-17 Windows 本地验证通过：`compose up` 后 `/healthz` 200（git_sha 407807e 构建注入）、`/readyz` database ok（启动即迁移）、web 3000 200；PIP_INDEX_URL 默认阿里云镜像（tuna 对容器 403，pypi.org 直连慢）。**VPS 验证待部署时执行**
+- [x] **0.7 容器化**：`docker-compose.yml`（api / web）+ `.env.example`（对齐 §11.2）+ Windows 本地与 VPS 各验证一次（B4 / B13）✅ 2026-11-17 Windows 本地：`compose up` 后 `/healthz` 200（git_sha 构建注入）、`/readyz` database ok、web 3000 200；PIP_INDEX_URL 默认阿里云镜像（tuna 对容器 403，pypi.org 直连慢）✅ 2026-11-19 VPS：阿里云轻量应用服务器（2核2G · 1Panel 镜像）compose on Linux，`/healthz` 200 且 git_sha=d4453f4 与本地一致、`/readyz` ok、公网 3000 可访问（demo URL 见 AGENTS.md 阿里云条目，IP 不入库）；过程坑与绕行（轻量≠ECS / RPM 系 / Docker Hub 加速 retag）已记 AGENTS.md
 - [x] **0.8 CI 占位**：GitHub Actions——pytest（空测试集）+ lint，PR 必过（B8）✅ 2026-11-17 run 44061287410 全绿（`test`/`lint` job 名与分支保护必需检查一致）；test job 含 alembic 迁移步骤，探针契约测试在 CI 环境通过
 - [x] **0.9 README**：快速上手、`architecture.svg` 引用、数据来源与导出日期声明（§14 授权风险缓解）✅ 2026-11-17 快速上手（compose/本地开发/数据导出）、数据来源表（POI 高德+人工校对日期、矩阵预计算+交叉验证、fare 启发式声明）、结构说明、CI 说明
 
@@ -103,7 +103,7 @@
 
 **目标**：部署上线并投递岗位；此后以真实使用驱动迭代。主打场景 **S2：同一会话内反复斟酌**（约束确定性累积已具备，缺口让 dogfood 暴露）。**不预建功能**——backlog 一律等真实使用证明痛了才做；期间代码可能大改，但阶段主线不变。决议来源：2026-11-18 grilling 会话（与作者逐轮确认）。
 
-- [ ] **5.1 上线与投递（本周）**：0.7 VPS 部署验证（compose on Linux，`/healthz` git_sha，公开 demo URL）；线头收完即**投递 MJ036607**，不等任何新功能 ✅ 2026-11-18 已收（f15e543）：architecture.svg 下线摘链（移本地 docs/）、audit 两份入库
+- [ ] **5.1 上线与投递（本周）**：0.7 VPS 部署验证（compose on Linux，`/healthz` git_sha，公开 demo URL）；线头收完即**投递 MJ036607**，不等任何新功能 ✅ 2026-11-18 已收（f15e543）：architecture.svg 下线摘链（移本地 docs/）、audit 两份入库 ✅ 2026-11-19 部署半边收口（VPS 验证通过，见 0.7）；**投递 MJ036607 未完成，保持未勾**
 - [ ] **5.2 作者 dogfood**：以旅行者身份 ≥3 个真实 session（含按行程实际出行 1 次）；badcase → `scripts/badcase_to_eval.py` 转用例 → 修复 → eval 回归，闭环至少跑通一轮
 - [ ] **5.3 外部真实用户**：外部真人产生 ≥10 个真实 plan（朋友/网友皆可）
 - [ ] **5.4 前端美化**：限时 3 天一次性收口，到点即停
