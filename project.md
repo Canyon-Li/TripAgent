@@ -122,7 +122,7 @@
 
 系统分六层，自上而下：
 
-1. **接入层**：静态单页，三个视图 —— 行程对话、Trace 回放、评测看板。
+1. **接入层**：静态单页，五个视图 —— 行程对话、手动规划、Trace 回放、评测看板、能力注册表。
 2. **API 层**：FastAPI 网关，统一暴露对话、求解、运行记录、评测、注册中心与健康检查端点。
 3. **Agent 运行时**：意图解析 → 记忆检索 → 能力发现 → 规划求解 → 约束校验与应答，单向主链路。
 4. **基础设施层**：四个并列支柱（记忆 / 评测观测 / 注册发现 / 框架稳定性），分别对应 JD ②③④⑤。
@@ -296,7 +296,7 @@ Capability card（§10 有 schema）。Registry 提供：注册 / 注销、按 `
 {
   "name": "TripAgent",
   "description": "多约束多日行程规划；硬约束由确定性求解器与独立校验器保证",
-  "version": "0.3.0",
+  "version": "0.1.0",
   "url": "https://<demo-host>/api/plan",
   "capabilities": { "streaming": false, "pushNotifications": false },
   "defaultInputModes": ["application/json"],
@@ -363,7 +363,7 @@ CREATE TABLE memory_events (
   event_type    TEXT NOT NULL,          -- assertion | belief | decision | observation
   content_json  TEXT NOT NULL,
   source        TEXT NOT NULL,          -- user_stated | behavior | environment | agent_generated
-  scope         TEXT NOT NULL,          -- trip:<id> | user:<id> | global
+  scope         TEXT NOT NULL,          -- session:<id> | user:<id> | global
   confidence    REAL NOT NULL DEFAULT 1.0,
   decay_weight  REAL NOT NULL DEFAULT 1.0,
   supersedes_id INTEGER REFERENCES memory_events(id),
@@ -444,6 +444,7 @@ CREATE TABLE eval_results (
 | `POST` | `/api/chat` | SSE 流式对话，返回增量文本与最终 `trace_id`。请求体可带可选 `start_date`（评测用例固定日期保证周一闭馆类断言确定性，§15；生产前端不传，默认当天） |
 | `POST` | `/api/plan` | 结构化输入直接求解，跳过意图解析（便于评测） |
 | `GET` | `/api/runs/{trace_id}` | 返回 run + spans，供 Trace 视图回放 |
+| `GET` | `/api/pois` | 只读 POI 目录（前端偏好 / 必去点选项数据源，阶段 1 另加） |
 | `POST` | `/api/eval/run` | 触发全量评测，返回报告路径 |
 | `GET` | `/api/eval/reports` | 列出历史报告与指标趋势 |
 | `GET` / `POST` | `/api/registry/capabilities` | 查询 / 注册能力卡片（GET 支持 kind/tag/latest 发现参数，响应含 `policy_view` 版本策略视图） |
@@ -501,7 +502,7 @@ POST /api/plan
 .
 ├── project.md                 # 本文档
 ├── README.md                  # 快速上手 + 面试导航
-├── docker-compose.yml         # api / web / (可选) worker
+├── docker-compose.yml         # api / web
 ├── .env.example               # 不含真实密钥
 ├── pyproject.toml
 ├── alembic/                   # schema 迁移
@@ -510,13 +511,14 @@ POST /api/plan
 │   ├── config.py
 │   ├── api/                   # 路由层
 │   ├── runtime/               # Planner / Resolver / Responder / 组件接口
+│   ├── llm/                   # LLM 适配器 + 白名单工具 schema（ADR-008）
 │   ├── memory/                # Ledger / Views / Policy
 │   ├── registry/              # Capability card / discovery / health
 │   ├── solver/                # OR-Tools Routing 建模 + 距离矩阵
 │   ├── verifier/              # 独立校验器
 │   ├── eval/                  # runner / graders / report
 │   └── db/                    # models / repository
-├── web/                       # 静态前端：行程 / Trace / 评测看板
+├── web/                       # 静态前端：对话 / 手动规划 / Trace / 评测看板 / 能力注册表
 ├── data/
 │   ├── pois.json
 │   ├── matrix.json
@@ -550,7 +552,7 @@ docker compose up --build
 # api  -> http://localhost:8000/docs
 # 单测与评测
 pytest -q
-python -m app.eval.runner --baseline
+python -m app.eval.runner --baseline all
 ```
 
 ### 11.4 重启与版本管理
@@ -580,7 +582,7 @@ python -m app.eval.runner --baseline
 > A 列全败并非意外：纯 LLM 直出行程在校验器下平均每例 5+ 处时间线/闭馆冲突、不可行请求全部硬凑
 > （预算 1 元仍排出付费行程）——即 ADR-006 要复现的失效模式。
 
-**验收规则**：任一硬约束类指标退化即视为回归；`final_pass_rate` 相对于 `baseline` 下降超过 2 个百分点时 CI 失败。所有报告必须注明 `git_sha`、模型名与评测集版本，保证可复现。（已落地：CI `eval` job 对比 `reports/baseline.json`，main 分支保护必需检查 test / lint / eval。）
+**验收规则**：任一硬约束类指标退化即视为回归；`final_pass_rate` 相对于 `baseline` 下降超过 2 个百分点时 CI 失败。所有报告必须注明 `git_sha`、模型名与评测集版本，保证可复现。（已落地：CI `eval` job 对比 `reports/baseline.json`，main 分支保护必需检查 test / lint / typecheck / eval。）
 
 ---
 
@@ -594,6 +596,7 @@ python -m app.eval.runner --baseline
 | **2 记忆层** | Ledger / Views / Policy、多轮一致性演示 | 第 6 轮约束回显正确，可回放 Ledger | ✅ 完成（2026-11-17）：memory_events/memory_views 落地（追加写 + supersedes 归档 + 重放重建）；Memory.read scope 链注入（session→user→global、衰减只影响排序不丢硬约束）；Resolver 白名单 function calling（三工具 + 护栏 + 规则模板降级）；`POST /api/chat` SSE 六段 spans；前端对话视图（用户切换/约束来源徽标）；六轮演进召回 / 跨会话注入 / 用户隔离 / rebuild 一致全过（pytest 106 绿）；任务明细见 `TASKS.md` 阶段 2 |
 | **3 评测观测** | 评测集、Trace Store、看板、CI 回归报告 | 产出改动前后指标对比图 | ✅ 完成（2026-11-17）：40 条全集（32 公开 + 8 hidden，chat 多轮内嵌脚本）+ 双基线三列报告（ADR-006，current 0.975 / A 0.000 / B 0.800）+ §12 八指标真实回填 + Trace 瀑布图与评测看板前端视图 + CI `eval` 回归 job（baseline.json 对比，分支保护 test/lint/eval）+「最近一次可行方案」降级收口；报告 [reports/eval-7731d7c.md](reports/eval-7731d7c.md)，任务明细见 `TASKS.md` 阶段 3 |
 | **4 平台化** | Registry、健康检查、灰度回滚、故障注入测试、只读 Agent Card 导出 | 回滚无需重启；降级路径可用；卡片与 `/api/plan` schema 一致 | **已完成**（2026-11-18：`capabilities` 表迁移 `c5e01a4b7d02`、5 张默认卡、确定性加权路由、30s 心跳摘除/回切、`/.well-known/agent.json`、pytest 169 绿 + compose 实测灰度→回滚全程不重启） |
+| **5 上线与真实使用** | 部署上线与投递、作者 dogfood、外部真实用户、前端收口 | dogfood ≥3 次（含实际出行 1 次）；外部 ≥10 个真实 plan；badcase→用例→修复闭环至少一轮；前端 3 天内收口 | 🟡 进行中（2026-11-18 起，清单见 `TASKS.md` 阶段 5；不预建功能，以真实使用驱动迭代） |
 
 > 时间提示：该岗位 2026-09-15 发布、招满即止，10 月起已陆续发放 offer。**优先完成阶段 0–3**，阶段 4 作为加分演示。范围控制遵循 §3.2。
 > 2026-11-17 边界确认（B1/B2）：时间盒 ≥ 1 个月，阶段 0–4 全做，首个里程碑为阶段 1；阶段 0–1 任务清单见 `TASKS.md`。

@@ -19,7 +19,7 @@ GIT_SHA=$(git rev-parse --short HEAD) docker compose up --build
 ```bash
 uv venv --python 3.11 .venv
 uv pip install --python .venv -e ".[dev]"        # 或 pip install -e ".[dev]"
-.venv/Scripts/alembic upgrade head               # 建 runs/spans + memory_events/memory_views 表
+.venv/Scripts/alembic upgrade head               # 建 runs/spans + memory_events/memory_views + eval_results/capabilities 表
 .venv/Scripts/python.exe -m pytest -q
 .venv/Scripts/python.exe -m uvicorn app.main:app --port 8000
 ```
@@ -104,7 +104,7 @@ curl http://localhost:3000/.well-known/agent.json
 ```
 app/            FastAPI 入口 / 配置 / api（plan·chat·memory·eval·registry·agent_card·runs·pois）/ db（repository·runs·evals·models）
                 memory（Ledger·Policy·Views·Memory.read）/ llm（适配器·白名单工具）/ runtime（Resolver·Responder·pipeline）
-                solver（VRPTW，v1/v2 参数化）/ verifier（独立校验）/ eval（runner·graders·report·baseline_a）
+                solver（VRPTW，v1/v2 参数化）/ verifier（独立校验）/ eval（runner·graders·report·baseline_a·cases·badcase）
                 registry（cards·service·seed·health——能力卡 / 加权路由 / 心跳，§7.4）
 alembic/        schema 迁移（禁止手工改表，§11.4）
 scripts/        export_pois / build_matrix（一次性导出）+ check_plans（plan 用例批量断言）+ badcase_to_eval（坏例转用例）
@@ -126,4 +126,4 @@ GitHub Actions（[ci.yml](.github/workflows/ci.yml)）：`lint`（ruff）+ `type
 
 当前：**阶段 4 · 平台化已完成**（2026-11-18，详见 [TASKS.md](TASKS.md)）——Capability Registry（§7.4：能力卡 SQLite 存权重与版本绑定，路由时读取，**回滚不重启**）+ solver v1/v2 参数化灰度（ADR-007，确定性加权路由）+ 30s 心跳健康检查（失败自动摘除 / 恢复回切，/readyz 联动）+ §15 故障注入测试（LLM 超时降级 / 能力摘除 503 不硬凑 / stale run interrupted 清扫）+ 只读 discovery-only Agent Card（ADR-009，`/.well-known/agent.json`）+ 前端「能力注册表」视图。
 
-至此阶段 0–4 全部完成（§13）；唯一开放项：0.7 的 VPS 部署验证（需真实 VPS 环境）。
+至此阶段 0–4 全部完成（§13）。当前进行：**阶段 5 · 上线与真实使用**（2026-11-18 起，清单见 [TASKS.md](TASKS.md)）——0.7 的 VPS 部署验证并入 5.1，此后以真实使用驱动迭代，不预建功能。
