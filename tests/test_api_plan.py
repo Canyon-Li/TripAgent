@@ -115,3 +115,21 @@ def test_plan_costs_reported(client: TestClient) -> None:
     cost = r.json()["cost"]
     assert cost["latency_ms"] >= 0
     assert cost["token_in"] == 0 and cost["token_out"] == 0  # 阶段 1 无 LLM 参与 /api/plan
+
+
+def test_plan_cost_breakdown_reconciles(client: TestClient) -> None:
+    """费用构成可对平（阶段 5 前置修复，data/badcases.jsonl 首条）：
+    verification 下发门票/车费拆分，逐日小计与站点门票一致、与总额咬合——
+    用户能把行程卡上可见的数字自己加总对上总花费。"""
+    r = client.post("/api/plan", json=_base_req())
+    assert r.status_code == 200
+    body = r.json()
+    v = body["verification"]
+    assert v["tickets_cny"] > 0 and v["fare_cny"] > 0
+    assert round(v["tickets_cny"] + v["fare_cny"], 2) == v["recomputed_budget"]
+    day_tickets = 0.0
+    for day in body["days"]:
+        assert day["ticket_cny"] == round(sum(s["ticket"] for s in day["stops"]), 2)
+        assert day["fare_cny"] > 0  # 每天至少含酒店往返一趟车费
+        day_tickets += day["ticket_cny"]
+    assert round(day_tickets, 2) == v["tickets_cny"]
