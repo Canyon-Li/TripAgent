@@ -6,6 +6,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # 周一 03:00（北京时间 = 周日 19:00 UTC）例行跑：时间依赖类测试的金丝雀
+    # （audit 2026-11-23 P1：故宫周一闭馆曾让锚 date.today() 的测试只在周一红）
+    - cron: "0 19 * * 0"
 
 jobs:
   lint:

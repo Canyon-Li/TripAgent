@@ -6,7 +6,7 @@
 | --- | --- |
 | 文档状态 | **Draft / 设计稿（边界已确认，见 §0）**（实现进度见 §13） |
 | 版本 | v0.3.0 |
-| 最后更新 | 2026-11-18 |
+| 最后更新 | 2026-11-25 |
 | 目标读者 | 项目开发者、面试考官、后续维护者 |
 | 关联文件 | `TASKS.md`（阶段 0–5 任务清单）、`reports/audit-*.md`（分支与文档审计） |
 | 技术栈 | Python 3.11+ / FastAPI / SQLite / OR-Tools / OpenAI-compatible LLM / 静态前端 / Docker Compose |

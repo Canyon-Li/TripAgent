@@ -18,8 +18,13 @@ from app.memory import ledger
 from tests.fakes import FakeLLM, tool_call_result
 
 
-def _turn(client: TestClient, session: str, user: str, message: str, fields: dict) -> dict:
-    """一轮对话：FakeLLM resolver 只报本轮显式字段（模型正确行为的脚本化）。"""
+def _turn(client: TestClient, session: str, user: str, message: str, fields: dict,
+          start_date: str = "2026-11-18") -> dict:
+    """一轮对话：FakeLLM resolver 只报本轮显式字段（模型正确行为的脚本化）。
+
+    start_date 每轮都带（不入记忆，缺省时每轮独立锚 date.today()）且固定周三：
+    故宫等周一闭馆，否则断言随星期几漂移（audit 2026-11-23 P1；与 eval runner 同做法）。
+    """
     from app.main import app
 
     fake = FakeLLM([
@@ -29,6 +34,7 @@ def _turn(client: TestClient, session: str, user: str, message: str, fields: dic
     try:
         r = client.post("/api/chat", json={
             "session_id": session, "user_id": user, "message": message,
+            "start_date": start_date,
         })
     finally:
         app.dependency_overrides.pop(get_llm_optional, None)
