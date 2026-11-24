@@ -109,9 +109,9 @@ app/            FastAPI 入口 / 配置 / api（plan·chat·memory·eval·regist
 alembic/        schema 迁移（禁止手工改表，§11.4）
 scripts/        export_pois / build_matrix（一次性导出）+ check_plans（plan 用例批量断言）+ badcase_to_eval（坏例转用例）
 web/            静态前端（无构建；行程对话 + 手动规划 + Trace 回放瀑布图 + 评测看板 + 能力注册表五视图）+ nginx.conf（/api 与 /.well-known 同源反代）
-data/           pois.json / matrix.json / eval_cases.jsonl（40 条全集，含 20% hidden）/ tripagent.db（库文件不入库）
+data/           pois.json / matrix.json / eval_cases.jsonl（40 条全集，含 20% hidden）/ badcases.jsonl（dogfood 坏例台账，TASKS 5.2/5.3）/ tripagent.db（库文件不入库）
 reports/        eval-<sha>.md 评测报告 + baseline.json（CI 回归基线）
-tests/          pytest（契约 / 求解 / 校验 / 属性 / 记忆一致性 / 护栏 / 评测 / 注册路由 / 心跳故障注入 / 文档同步等 184 项）
+tests/          pytest（契约 / 求解 / 校验 / 属性 / 记忆一致性 / 护栏 / 评测 / 注册路由 / 心跳故障注入 / 文档同步等 186 项）
 ```
 
 ## 环境变量

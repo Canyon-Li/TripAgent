@@ -3,7 +3,8 @@
 与 §10 示例对齐：请求含 city/days/hotel/budget/daily_minutes_cap/must_visit/
 preferences/session_id；响应含 trace_id/status/days[].stops[]（arrive/leave HH:MM、
 wait_min、门票）、applied_constraints、verification.violations、cost。
-额外字段（solver 观测信息、date、name 等）为前端与 Trace 视图服务，不改变示例结构。
+额外字段（solver 观测信息、date、name、逐日/全程费用构成拆分等）为前端与
+Trace 视图服务，不改变示例结构。
 """
 
 from __future__ import annotations
@@ -63,6 +64,8 @@ class DayOut(BaseModel):
     return_: str = Field(alias="return")  # 回到酒店 "HH:MM"（return 为关键字，序列化别名）
     away_minutes: int
     stops: list[StopOut] = Field(default_factory=list)
+    ticket_cny: float = 0.0   # 当日门票小计（= Σ stops[].ticket，可自行加总核对）
+    fare_cny: float = 0.0     # 当日车费小计（出租车启发式，含酒店往返；酒店=出发点，无住宿费）
 
     model_config = {"populate_by_name": True}
 
@@ -77,6 +80,8 @@ class ViolationOut(BaseModel):
 class VerificationOut(BaseModel):
     violations: list[ViolationOut] = Field(default_factory=list)
     recomputed_budget: float = 0.0
+    tickets_cny: float = 0.0  # 全程门票小计（费用构成可见、可对平，阶段 5 前置修复）
+    fare_cny: float = 0.0     # 全程车费小计（出租车启发式，含每日酒店往返）
 
 
 class ConstraintEcho(BaseModel):

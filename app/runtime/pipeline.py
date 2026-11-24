@@ -160,6 +160,8 @@ def run_plan_pipeline(
                 for v in verification_raw.violations
             ],
             recomputed_budget=verification_raw.recomputed_budget,
+            tickets_cny=verification_raw.tickets_cny,
+            fare_cny=verification_raw.fare_cny,
         )
         if verification_raw.violations:
             infeasible_reasons += [
@@ -167,6 +169,8 @@ def run_plan_pipeline(
                 for v in verification_raw.violations
             ]
         else:
+            # 逐日费用审计按 date_index 对齐到行程卡（费用构成可见、可对平）
+            audits = {a.date_index: a for a in verification_raw.day_audits}
             days_out = [
                 DayOut(
                     date_index=d.date_index,
@@ -188,6 +192,8 @@ def run_plan_pipeline(
                         )
                         for s in d.stops
                     ],
+                    ticket_cny=audits[d.date_index].ticket_cny,
+                    fare_cny=audits[d.date_index].fare_cny,
                 )
                 for d in result.days
             ]

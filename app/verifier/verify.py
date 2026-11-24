@@ -64,15 +64,20 @@ class Violation:
 
 @dataclass
 class DayAudit:
+    """单日费用审计（阶段 5 前置修复：拆分让用户能对平——门票 + 车费 = 当日小计）。"""
+
     date_index: int
     away_minutes: int
-    fare_cny: float
+    fare_cny: float            # 当日车费（出租车启发式，含酒店往返）
+    ticket_cny: float = 0.0    # 当日门票小计
 
 
 @dataclass
 class VerificationResult:
     violations: list[Violation] = field(default_factory=list)
     recomputed_budget: float = 0.0
+    tickets_cny: float = 0.0   # 全程门票小计（拆分可见，data/badcases.jsonl 首条）
+    fare_cny: float = 0.0      # 全程车费小计（含每日酒店往返）
     day_audits: list[DayAudit] = field(default_factory=list)
 
     @property
@@ -102,8 +107,9 @@ def verify_itinerary(
             ))
             continue
 
-        # ---- 该日逐段重算时间线与费用 ----
-        cost = 0.0
+        # ---- 该日逐段重算时间线与费用（门票/车费分账累计，总额不变）----
+        fare_cost = 0.0
+        ticket_cost = 0.0
         t = day.depart_min
         prev = 0  # 矩阵下标 0 = 酒店
         for stop in day.stops:
@@ -150,12 +156,13 @@ def verify_itinerary(
                     day_index=day.date_index, poi=stop.poi_id,
                 ))
 
-            cost += fare[prev][node] + poi.ticket
+            fare_cost += fare[prev][node]
+            ticket_cost += poi.ticket
             t = arrive + poi.duration_min
             prev = node
 
         return_min = t + minutes[prev][0]
-        cost += fare[prev][0]
+        fare_cost += fare[prev][0]
         away = return_min - day.depart_min
         if away > request.daily_minutes_cap:
             result.violations.append(Violation(
@@ -164,8 +171,10 @@ def verify_itinerary(
                 f"{request.daily_minutes_cap}min",
                 day_index=day.date_index,
             ))
-        total_cost += cost
-        result.day_audits.append(DayAudit(day.date_index, away, round(cost, 2)))
+        total_cost += fare_cost + ticket_cost
+        result.day_audits.append(DayAudit(
+            day.date_index, away, round(fare_cost, 2), round(ticket_cost, 2),
+        ))
 
     if total_cost > request.budget + _EPS:
         result.violations.append(Violation(
@@ -179,4 +188,8 @@ def verify_itinerary(
         ))
 
     result.recomputed_budget = round(total_cost, 2)
+    # 拆分口径 = Σ逐日(先 round) 再 round：与响应里的逐日小计严格同源，
+    # 「逐日加总 == 全程拆分 == 总花费」是结构保证而非数据巧合（对平判据）
+    result.tickets_cny = round(sum(a.ticket_cny for a in result.day_audits), 2)
+    result.fare_cny = round(sum(a.fare_cny for a in result.day_audits), 2)
     return result

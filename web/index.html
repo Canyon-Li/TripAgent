@@ -307,7 +307,7 @@ function itineraryHtml(b, budgetEcho) {
   const feasible = b.status === "feasible";
   const v = b.verification ?? { violations: [], recomputed_budget: 0 };
   let html = feasible
-    ? `<div class="banner ok">✓ 可行 —— 独立校验器复核通过：时间窗冲突 0、预算 ${v.recomputed_budget} 元 ≤ ${budgetEcho} 元</div>`
+    ? `<div class="banner ok">✓ 可行 —— 独立校验器复核通过：时间窗冲突 0、重算花费 ${v.recomputed_budget} 元 ≤ 预算 ${budgetEcho} 元</div>`
     : `<div class="banner bad">✗ 不可行（不硬凑行程，原因如下）</div><ul class="reasons">` +
       (b.infeasible_reasons ?? []).map(x => `<li>${x}</li>`).join("") + "</ul>";
   html += `<p class="meta">trace_id <code>${b.trace_id}</code> ` +
@@ -330,9 +330,18 @@ function itineraryHtml(b, budgetEcho) {
           `<td>${s.wait_min ? `<span class="wait">等 ${s.wait_min} 分钟</span>` : "—"}</td>` +
           `<td>${s.ticket ? "¥" + s.ticket : '<span class="free">免费</span>'}</td></tr>`;
       });
-      html += "</table></div>";
+      html += "</table>";
+      // 逐日小计：门票列可直接加总核对，车费由校验器独立重算下发（总额 − 门票 = 车费）
+      html += `<p class="meta">本日小计：门票 ¥${d.ticket_cny} + 车费 ¥${d.fare_cny}` +
+        `（出租车启发式估算，含从酒店出发与返回）= ¥${(d.ticket_cny + d.fare_cny).toFixed(1)}</p>`;
+      html += "</div>";
     });
-    html += `<p class="meta">重算总花费 ${v.recomputed_budget} 元（门票 + 出租车启发式车费）</p>`;
+    // 费用构成对平（data/badcases.jsonl 首条）：此前只显示总额，用户拿可见门票
+    // 加总对不上、差额（车费）无从核对。酒店仅为每日出发/返回锚点，不收住宿费。
+    html += `<p class="meta">费用构成：门票合计 ¥${v.tickets_cny} + ` +
+      `车费合计 ¥${v.fare_cny}（出租车启发式估算，含每日酒店往返）` +
+      `= 重算总花费 ¥${v.recomputed_budget}。` +
+      `「酒店」是行程出发点（每日出发/返回锚点），<b>不含住宿费</b>。</p>`;
   }
   return html;
 }
