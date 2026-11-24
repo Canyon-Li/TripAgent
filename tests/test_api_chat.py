@@ -28,10 +28,16 @@ def install_llm(client: TestClient) -> Callable[[FakeLLM], None]:
     app.dependency_overrides.pop(get_llm_optional, None)
 
 
-def _post(client: TestClient, message: str, *, session: str, user: str):
-    """session 与 user 必须显式传入：user 级记忆跨测试泄漏会改变分支走向。"""
+def _post(client: TestClient, message: str, *, session: str, user: str,
+          start_date: str = "2026-11-18"):
+    """session 与 user 必须显式传入：user 级记忆跨测试泄漏会改变分支走向。
+
+    start_date 固定周三：故宫等周一闭馆，缺省锚 date.today() 会让断言随星期几漂移
+    （audit 2026-11-23 P1；与 eval_cases.jsonl 同口径）。
+    """
     r = client.post("/api/chat", json={
         "session_id": session, "user_id": user, "message": message,
+        "start_date": start_date,
     })
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/event-stream")

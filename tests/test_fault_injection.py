@@ -56,8 +56,10 @@ def test_llm_timeout_degrades_to_rule_template(install_llm, client: TestClient):
     from app.llm.adapter import LLMRetryableError
 
     install_llm(FakeLLM([LLMRetryableError("timeout after 30s"), LLMRetryableError("timeout")]))
+    # start_date 固定周三：故宫周一闭馆，锚 date.today() 会让断言随星期几漂移（audit 2026-11-23 P1）
     resp = client.post("/api/chat", json={
         "message": "预算9000玩1天必去故宫", "user_id": "u-fi", "session_id": "s-fi-timeout",
+        "start_date": "2026-11-18",
     })
     done = json.loads(next(
         b.split("data: ", 1)[1] for b in resp.text.split("\n\n") if b.startswith("event: done")
@@ -156,5 +158,6 @@ def test_clarification_unaffected_by_registry(client: TestClient):
     service.set_status("solver", "v2", "unhealthy")
     resp = client.post("/api/chat", json={
         "message": "想去北京玩", "user_id": "u-fi2", "session_id": "s-fi-clar",
+        "start_date": "2026-11-18",
     })
     assert "event: clarification" in resp.text

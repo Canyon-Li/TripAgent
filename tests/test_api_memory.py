@@ -22,13 +22,19 @@ def install_llm(client: TestClient):
     app.dependency_overrides.pop(get_llm_optional, None)
 
 
-def _chat(client: TestClient, message: str, *, session: str, user: str, fake: FakeLLM) -> dict:
-    """单轮 chat，返回 done 事件 payload（fake 每轮重装以注入脚本）。"""
+def _chat(client: TestClient, message: str, *, session: str, user: str, fake: FakeLLM,
+          start_date: str = "2026-11-18") -> dict:
+    """单轮 chat，返回 done 事件 payload（fake 每轮重装以注入脚本）。
+
+    start_date 固定周三：故宫等周一闭馆，缺省锚 date.today() 会让断言随星期几漂移
+    （audit 2026-11-23 P1；与 eval_cases.jsonl 同口径）。
+    """
     from app.main import app
 
     app.dependency_overrides[get_llm_optional] = lambda: fake
     r = client.post("/api/chat", json={
         "session_id": session, "user_id": user, "message": message,
+        "start_date": start_date,
     })
     app.dependency_overrides.pop(get_llm_optional, None)
     assert r.status_code == 200
